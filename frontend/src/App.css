@@ -1,0 +1,291 @@
+/* "Where Nature Leads" — full-screen game shell + overlays. */
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #0e1a1b;
+  color: #eef4ee;
+  font-family: 'Cormorant Garamond', 'EB Garamond', 'Iowan Old Style',
+               'Palatino Linotype', 'Book Antiqua', Palatino, serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.wnl-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.wnl-canvas-container {
+  position: absolute;
+  inset: 0;
+}
+
+/* Vignette above canvas, below overlays. Non-interactive. */
+.wnl-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center,
+      rgba(0,0,0,0) 55%,
+      rgba(0,0,0,0.35) 100%);
+  z-index: 1;
+}
+
+/* Full-screen overlays share this base. */
+.wnl-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5rem;
+  padding: 2rem;
+  text-align: center;
+  background:
+    radial-gradient(ellipse at 50% 40%,
+      rgba(30,55,55,0.55) 0%,
+      rgba(10,20,20,0.85) 60%,
+      rgba(5,10,10,0.95) 100%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: wnl-fade-in 700ms ease-out both;
+}
+@keyframes wnl-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ==== Title ==== */
+.wnl-loading-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 0.92;
+  letter-spacing: 0.28em;
+  font-weight: 400;
+  font-style: italic;
+  color: #e6f0e6;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,0.35),
+    0 8px 40px rgba(140,190,180,0.15);
+}
+.wnl-title-line1,
+.wnl-title-line3 {
+  font-size: clamp(2rem, 4.5vw, 3.5rem);
+  color: #b7cec4;
+  letter-spacing: 0.45em;
+  margin-left: 0.4em;
+  font-weight: 300;
+}
+.wnl-title-line2 {
+  font-size: clamp(4rem, 10vw, 8rem);
+  color: #ecf3ec;
+  letter-spacing: 0.16em;
+  font-style: italic;
+  font-weight: 500;
+  margin: 0.12em 0;
+}
+
+.wnl-title-sub {
+  margin: 0;
+  font-style: italic;
+  font-size: clamp(1rem, 1.6vw, 1.25rem);
+  color: rgba(220, 235, 225, 0.7);
+  letter-spacing: 0.08em;
+}
+
+.wnl-title-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, auto));
+  gap: 0.4rem 2rem;
+  font-size: 0.95rem;
+  color: rgba(210, 225, 220, 0.75);
+  font-family: 'Iowan Old Style', 'Palatino Linotype', serif;
+}
+.wnl-title-controls kbd {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 0 3px;
+  border-radius: 4px;
+  background: rgba(200,220,210,0.08);
+  border: 1px solid rgba(200,220,210,0.22);
+  color: #dbeadb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+/* ==== Play button ==== */
+.wnl-play-btn {
+  position: relative;
+  padding: 0.85rem 2.4rem;
+  font-family: inherit;
+  font-size: 1.15rem;
+  font-style: italic;
+  letter-spacing: 0.22em;
+  color: #ecf3ec;
+  background: transparent;
+  border: 1px solid rgba(200, 220, 210, 0.55);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 260ms ease, border-color 260ms ease,
+              color 260ms ease, transform 260ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.wnl-play-btn::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 999px;
+  border: 1px solid rgba(200, 220, 210, 0.14);
+  pointer-events: none;
+  transition: transform 400ms ease, opacity 400ms ease;
+}
+.wnl-play-btn:hover {
+  background: rgba(200, 220, 210, 0.08);
+  border-color: rgba(220, 240, 230, 0.9);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+.wnl-play-btn:hover::after {
+  transform: scale(1.03);
+  opacity: 0.6;
+}
+.wnl-play-btn:active { transform: translateY(0); }
+
+/* ==== Loading bar ==== */
+.wnl-loading-bar {
+  width: min(420px, 70vw);
+  height: 2px;
+  background: rgba(200,220,210,0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wnl-loading-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg,
+    rgba(180,220,205,0.4) 0%,
+    rgba(220,240,225,0.9) 50%,
+    rgba(255,220,170,0.6) 100%);
+  transition: width 400ms ease;
+}
+.wnl-loading-label {
+  font-style: italic;
+  color: rgba(210, 225, 220, 0.75);
+  letter-spacing: 0.14em;
+  font-size: 0.95rem;
+  min-height: 1.4em;
+}
+.wnl-loading-dots i {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: wnl-dot 1.2s infinite ease-in-out;
+}
+.wnl-loading-dots i:nth-child(2) { animation-delay: 0.2s; }
+.wnl-loading-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes wnl-dot {
+  0%, 80%, 100% { opacity: 0.15; transform: translateY(0); }
+  40%           { opacity: 1.0;  transform: translateY(-2px); }
+}
+
+/* ==== Pause / error card ==== */
+.wnl-pause-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2rem;
+  padding: 2rem 2.6rem;
+  border: 1px solid rgba(200,220,210,0.22);
+  border-radius: 12px;
+  background: rgba(15, 28, 28, 0.55);
+  box-shadow: 0 30px 60px rgba(0,0,0,0.35);
+}
+.wnl-pause-title {
+  font-size: 1.8rem;
+  font-style: italic;
+  letter-spacing: 0.14em;
+  color: #ecf3ec;
+}
+.wnl-pause-hint {
+  margin: 0;
+  color: rgba(210, 225, 220, 0.75);
+  font-style: italic;
+  max-width: 32ch;
+}
+
+/* ==== Area banner ==== */
+.wnl-area-banner {
+  position: absolute;
+  top: 8vh;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  animation: wnl-area-in 500ms ease-out both, wnl-area-out 700ms ease-in 2600ms forwards;
+}
+.wnl-area-banner-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.5rem 1.4rem;
+  color: #eaf1ea;
+  font-style: italic;
+  font-size: clamp(1.1rem, 1.8vw, 1.5rem);
+  letter-spacing: 0.2em;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.35), 0 6px 30px rgba(0,0,0,0.4);
+}
+.wnl-area-banner-caret {
+  color: rgba(220, 240, 230, 0.55);
+  font-family: 'Iowan Old Style', serif;
+}
+@keyframes wnl-area-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes wnl-area-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* ==== Debug HUD ==== */
+.wnl-debug {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  padding: 8px 12px;
+  background: rgba(10, 20, 20, 0.55);
+  border: 1px solid rgba(200,220,210,0.18);
+  border-radius: 6px;
+  color: #d8ead8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(6px);
+}
+.wnl-debug b {
+  color: #ffd8a0;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.wnl-debug-hint {
+  margin-top: 4px;
+  color: rgba(220,235,225,0.5);
+  font-size: 10.5px;
+  font-style: italic;
+}

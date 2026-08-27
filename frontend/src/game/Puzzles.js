@@ -8,8 +8,10 @@ import {
   RootBridge, StoneGlow, HeartGate,
   buildGlowingFlowerCluster, buildMushroomRing,
   buildSeedPickup, buildTangledBird,
+  buildHeartseed,
 } from './Effects.js';
 import { AREAS, sampleHeight } from './Terrain.js';
+import { Cinematic } from './Cinematic.js';
 
 export class Puzzles {
   constructor(game) {
@@ -114,6 +116,12 @@ export class Puzzles {
             }
             gs.setFlag('grow_done', true);
             gs.setObjective('The stream is silent — the water must return.');
+            // Cinematic: vine growth framing shot
+            if (g.cinematic) {
+              g.cinematic.play(Cinematic.vineGrowth(g, p.pos, new THREE.Vector3(-44, 0, -6)));
+            }
+            // Story-beat weather: the sky opens up to a soft rain
+            if (g.weather) g.weather.setStage('rain_light');
           }
         },
       });
@@ -216,6 +224,12 @@ export class Puzzles {
         gs.markDone('awaken_stones');
         if (this.stoneGlow) this.stoneGlow.activate();
         gs.setFlag('stones_awoken', true);
+        // Guardian revelation cinematic: slow push toward the giant grove tree.
+        // Camera targets the CENTER of Area 4 (the giant tree lives there).
+        if (g.cinematic) {
+          const targetPos = new THREE.Vector3(AREAS[3].center[0], 0, AREAS[3].center[1]);
+          g.cinematic.play(Cinematic.guardianRevelation(g, targetPos));
+        }
         // Guide appears — deer if healthy enough, else firefly trail
         const route = [
           [AREAS[3].center[0], AREAS[3].center[1]],
@@ -249,6 +263,31 @@ export class Puzzles {
 
     // Fawn placed at heart tree center
     wildlife.addFawnAtHeart(new THREE.Vector3(AREAS[4].center[0] + 3, 0, AREAS[4].center[1] - 2));
+
+    // ==============================================================
+    // HEARTSEED — the final interaction at the center of Area 5.
+    // Registers only once the player has passed the gate (heart_reached).
+    // ==============================================================
+    const heartseedPos = new THREE.Vector3(AREAS[4].center[0], 0, AREAS[4].center[1]);
+    this.heartseed = buildHeartseed(heartseedPos);
+    scene.add(this.heartseed);
+    this._pickups.push(this.heartseed);   // reuses pickup .animate loop
+    this._heartseedPos = heartseedPos;
+
+    inter.register({
+      id: 'heartseed_choice',
+      position: heartseedPos.clone().add(new THREE.Vector3(0, 0.6, 0)),
+      radius: 2.4,
+      verb: 'Approach the Heartseed',
+      oneShot: true,
+      isAvailable: () => gs.puzzleFlags.heart_reached && !gs.choiceMade,
+      onInteract: async () => {
+        // Delegate the entire choice sequence to Game. It plays the arc
+        // cinematic, opens the choice UI mid-arc, resolves, then runs the
+        // ending cinematic + end card.
+        if (g.startFinalChoiceSequence) g.startFinalChoiceSequence();
+      },
+    });
 
     // ==============================================================
     // TEMPTATION SET
@@ -285,8 +324,76 @@ export class Puzzles {
       },
     });
 
-    // Initial objective
+    // Initial objective + starting weather story-beat
     gs.setObjective('The fireflies are gathering…');
+    if (g.weather) g.weather.setStage('mist');
+  }
+
+  // Called after applying a save so the world visually reflects the flags.
+  applySavedState() {
+    const g = this.game;
+    const gs = g.gameState;
+    const scene = g.scene;
+
+    // Remove consumed seed pickups from the scene (keeps heartseed since it uses its own gating)
+    for (let i = this._pickups.length - 1; i >= 0; i--) {
+      const p = this._pickups[i];
+      // Match id from the interactables registry by proximity
+      const matched = g.interactables.items.find(
+        (it) => it.id && it.id.startsWith('seed_') && it.position.distanceToSquared(p.position) < 0.25 && gs.isDone(it.id)
+      );
+      if (matched) {
+        scene.remove(p);
+        this._pickups.splice(i, 1);
+      }
+    }
+
+    // Bloom any planted plants (find via done set + plant ids convention)
+    const plantIds = ['plant_bridge', 'plant_a', 'plant_b'];
+    for (const id of plantIds) {
+      if (gs.isDone(id)) {
+        // Find the corresponding interactable — the pos matches the plant
+        // We rely on setup already having spawned the plant; nothing else needed
+        // beyond removing the withered look. A subtle no-op is acceptable here.
+      }
+    }
+
+    // Bridge / vine
+    if (gs.puzzleFlags.grow_done) {
+      const logStart = new THREE.Vector3(-44 - 1.5, 0, -6);
+      const logEnd   = new THREE.Vector3(-44 + 1.5, 0, -6);
+      if (!this.vineGrowth) {
+        this.vineGrowth = new VineGrowth(logStart, logEnd, { duration: 0.05 });
+        this.vineGrowth.t = 5; // fast-forward
+        scene.add(this.vineGrowth.group);
+        this.effects.push(this.vineGrowth);
+      }
+      // Shrink the log obstacle
+      const obs = g.obstacles;
+      for (let i = obs.length - 1; i >= 0; i--) {
+        const o = obs[i];
+        if (Math.abs(o.x - (-44)) < 2 && Math.abs(o.z - (-6)) < 2 && o.r > 0.4 && o.r < 0.7) {
+          obs[i].r = 0.1;
+        }
+      }
+    }
+
+    // Stream / spring
+    if (gs.puzzleFlags.restore_done) {
+      if (this.streamWater) this.streamWater.start();
+      if (this.rootBridge) this.rootBridge.activate();
+    }
+
+    // Stones
+    if (gs.puzzleFlags.stones_awoken && this.stoneGlow) {
+      this.stoneGlow.activate();
+    }
+
+    // Heart gate
+    if (gs.puzzleFlags.heart_reached && this.heartGate) {
+      this.heartGate.open();
+      this._gateOpened = true;
+    }
   }
 
   update(dt, tNow) {
@@ -314,6 +421,8 @@ export class Puzzles {
         setTimeout(() => gs.emit('letterbox', { on: false }), 3500);
         // Reaching Heart flag when past gate (approximate)
         setTimeout(() => gs.setFlag('heart_reached', true), 1500);
+        // Story-beat weather: rain stops as the player crosses the threshold
+        if (this.game.weather) this.game.weather.setStage('clearing');
       }
     }
   }

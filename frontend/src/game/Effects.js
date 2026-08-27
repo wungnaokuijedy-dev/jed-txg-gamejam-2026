@@ -499,3 +499,69 @@ export function buildTangledBird(pos) {
   };
   return g;
 }
+
+
+// ==============================================================
+// Heartseed — luminous orb sitting on a small mossy pedestal at the
+// center of Area 5. This is the object the final choice is made on.
+// ==============================================================
+export function buildHeartseed(pos) {
+  const g = new THREE.Group();
+  // Pedestal — mossy carved stump (short low-poly cylinder + moss ring)
+  const stumpMat = new THREE.MeshStandardMaterial({ color: 0x5a4535, roughness: 0.95, flatShading: true });
+  const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.32, 12), stumpMat);
+  stump.position.y = 0.16;
+  stump.castShadow = true;
+  g.add(stump);
+  const mossMat = new THREE.MeshStandardMaterial({ color: 0x4a7a3a, roughness: 0.9, flatShading: true });
+  const moss = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.06, 6, 16), mossMat);
+  moss.rotation.x = Math.PI / 2;
+  moss.position.y = 0.34;
+  g.add(moss);
+  // Seed — golden emissive icosahedron
+  const seedMat = new THREE.MeshStandardMaterial({
+    color: 0xffe0a0, emissive: 0xffb060, emissiveIntensity: 1.35,
+    roughness: 0.35, metalness: 0.0,
+  });
+  const seed = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 1), seedMat);
+  seed.position.y = 0.62;
+  seed.castShadow = true;
+  g.add(seed);
+  // Halo — additive-blended translucent sphere
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0xfff1c8, transparent: true, opacity: 0.32,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 12), haloMat);
+  halo.position.y = 0.62;
+  g.add(halo);
+  // Outer aura ring
+  const auraMat = new THREE.MeshBasicMaterial({
+    color: 0xffd88a, transparent: true, opacity: 0.15,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const aura = new THREE.Mesh(new THREE.SphereGeometry(0.65, 16, 12), auraMat);
+  aura.position.y = 0.62;
+  g.add(aura);
+
+  g.position.set(pos.x, sampleHeight(pos.x, pos.z), pos.z);
+  g.userData.floatT = Math.random() * Math.PI * 2;
+  g.userData.animate = (dt, t) => {
+    g.userData.floatT += dt;
+    seed.rotation.y += dt * 0.8;
+    seed.rotation.x += dt * 0.35;
+    const bob = Math.sin(t * 1.5 + g.userData.floatT) * 0.06;
+    seed.position.y = 0.62 + bob;
+    halo.position.y = seed.position.y;
+    halo.scale.setScalar(1 + Math.sin(t * 2.0 + g.userData.floatT) * 0.08);
+    aura.position.y = seed.position.y;
+    aura.scale.setScalar(1 + Math.sin(t * 1.2 + g.userData.floatT * 0.7) * 0.05);
+  };
+  g.userData.remove = () => {
+    // Called if player picks Take — seed leaves with the player.
+    g.remove(seed);
+    g.remove(halo);
+    g.remove(aura);
+  };
+  return g;
+}

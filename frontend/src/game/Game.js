@@ -14,6 +14,10 @@ import { GameState } from './GameState.js';
 import { Interactables } from './Interactables.js';
 import { Wildlife } from './Wildlife.js';
 import { Puzzles } from './Puzzles.js';
+import { Cinematic } from './Cinematic.js';
+import { Weather } from './Weather.js';
+import { Endings } from './Endings.js';
+import { save as saveGame, load as loadGame, apply as applySave, clearSave, hasSave, recordEndingSeen } from './Save.js';
 
 export class Game {
   constructor(container, callbacks = {}) {
@@ -149,8 +153,19 @@ export class Game {
     this.wildlife = new Wildlife(this);
     this.scene.add(this.wildlife.group);
     this.wildlife.addAmbientDeer();
+
+    // ==== Phase 3 systems (created BEFORE Puzzles.setup so puzzles can hook them) ====
+    this.cinematic = new Cinematic(this);
+    this.weather = new Weather(this);
+    this.scene.add(this.weather.points);
+    this.endings = new Endings(this);
+
     this.puzzles = new Puzzles(this);
     this.puzzles.setup(this._standingStones);
+
+    // Autosave book-keeping
+    this._autosaveTimer = 0;
+    this._hasSaveOnBoot = hasSave();
 
     // Notify GameApp when things change
     if (this.callbacks.onGameStateChange) {
@@ -168,9 +183,32 @@ export class Game {
       this.gameState.on('letterbox', ({ on }) => {
         if (this.callbacks.onLetterbox) this.callbacks.onLetterbox(on);
       });
+      // Phase 3 event forwards
+      this.gameState.on('subtitle', ({ text, duration }) => {
+        if (this.callbacks.onSubtitle) this.callbacks.onSubtitle({ text, duration });
+      });
+      this.gameState.on('hud_hide', ({ on }) => {
+        this.gameState.hudHidden = !!on;
+        if (this.callbacks.onHudHide) this.callbacks.onHudHide(!!on);
+      });
+      this.gameState.on('choice_open', () => {
+        if (this.callbacks.onChoiceOpen) this.callbacks.onChoiceOpen();
+      });
+      this.gameState.on('choice_close', () => {
+        if (this.callbacks.onChoiceClose) this.callbacks.onChoiceClose();
+      });
+      this.gameState.on('ending', (payload) => {
+        if (this.callbacks.onEnding) this.callbacks.onEnding(payload);
+      });
+      // Autosave on major story beats
+      this.gameState.on('flag', () => this.saveNow());
+      this.gameState.on('seeds', () => this.saveNow());
       // Push initial state
       emit();
     }
+
+    // Notify shell about save presence so it can offer Continue.
+    if (this.callbacks.onSaveState) this.callbacks.onSaveState({ hasSave: this._hasSaveOnBoot });
 
     this._reportProgress(1.0, 'Ready');
     if (this.callbacks.onLoaded) this.callbacks.onLoaded();
@@ -255,6 +293,112 @@ export class Game {
   requestPointerLock() { return this.input.requestPointerLock(); }
   isPointerLocked() { return this.input.pointerLocked; }
 
+  // ================================================================
+  // Phase 3 public API
+  // ================================================================
+
+  // Plays the opening cinematic. Skippable immediately.
+  playOpening() {
+    if (!this.cinematic) return;
+    if (this._openingPlayed) return;
+    this._openingPlayed = true;
+    this.cinematic.play(Cinematic.opening(this));
+  }
+
+  hasSave() { return hasSave(); }
+
+  // Load persisted state (called before start() if user picks Continue).
+  applyLoadedSave() {
+    const data = loadGame();
+    if (!data) return false;
+    const ok = applySave(data, this.gameState, this.character, this.weather);
+    if (ok && this.puzzles) this.puzzles.applySavedState();
+    return ok;
+  }
+
+  // Wipe any existing save. Called on New Game.
+  newGame() {
+    clearSave();
+    this._hasSaveOnBoot = false;
+  }
+
+  _doAutosave() {
+    if (!this.gameState || !this.character) return;
+    try {
+      saveGame(this.gameState, this.character, this.weather ? this.weather.getStage() : 'clear');
+    } catch (_) { /* ignore */ }
+  }
+
+  // Force an immediate save at a story beat (called from event listeners).
+  saveNow() {
+    const cineActive = !!(this.cinematic && this.cinematic.isActive());
+    if (cineActive) return;
+    if (this.gameState && this.gameState.endingResolved) return;
+    this._doAutosave();
+  }
+
+  // Kicks off the final-choice sequence. Called from the Heartseed interact.
+  startFinalChoiceSequence() {
+    if (!this.cinematic || !this._heartseedPosVec()) return;
+    if (this.gameState.choiceMade) return;
+    const cfg = Cinematic.heartChoiceArc(this, this._heartseedPosVec());
+    // At ~1.5s during the arc, fade in the choice UI (letterbox already active).
+    // Also release pointer lock so the player can click the choice buttons.
+    cfg.triggers = [
+      {
+        t: 1.5, fn: () => {
+          this.gameState.emit('choice_open', {});
+          try { document.exitPointerLock(); } catch (_) {}
+        },
+      },
+    ];
+    this.cinematic.play(cfg);
+  }
+
+  _heartseedPosVec() {
+    if (!this.puzzles || !this.puzzles._heartseedPos) return null;
+    return this.puzzles._heartseedPos;
+  }
+
+  // Called by the choice UI when the player picks an option.
+  resolveFinalChoice(choice) {
+    if (!this.gameState || this.gameState.choiceMade) return;
+    // If the arc cinematic is still running, force-end it so we can chain.
+    if (this.cinematic && this.cinematic.isActive()) {
+      this.cinematic.stop();
+    }
+    const kind = this.gameState.resolveEnding(choice);
+    // Close the choice UI (keeps letterbox because the ending cinematic uses it too)
+    this.gameState.emit('choice_close', {});
+
+    // Visual response: if they Took the seed, remove the seed geometry.
+    if (this.puzzles && this.puzzles.heartseed) {
+      if (choice === 'take') {
+        try { this.puzzles.heartseed.userData.remove && this.puzzles.heartseed.userData.remove(); } catch (_) {}
+      }
+    }
+
+    // Trigger ending-specific scene effects
+    if (this.endings) {
+      if (kind === 'guardian') this.endings.playGuardian();
+      else if (kind === 'balance') this.endings.playBalance();
+      else this.endings.playSilence();
+    }
+
+    // Play ending cinematic; on end, reveal end card + persist ending record.
+    const heartseedPos = this._heartseedPosVec() || new THREE.Vector3(AREAS[4].center[0], 0, AREAS[4].center[1]);
+    const cfg = Cinematic.ending(this, heartseedPos, kind);
+    cfg.onEnd = () => {
+      const message = this.endings ? this.endings.endingMessage(kind) : '';
+      this.gameState.emit('ending', { kind, message, choice });
+      // Persist ending record + clear save so a fresh New Game starts clean
+      try { recordEndingSeen(kind); } catch (_) {}
+      try { clearSave(); } catch (_) {}
+      this._hasSaveOnBoot = false;
+    };
+    this.cinematic.play(cfg);
+  }
+
   _resize() {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
@@ -277,16 +421,52 @@ export class Game {
     if (dt < 0) dt = 0;
     this._lastT = nowMs;
 
-    // Update character + camera regardless of pointer lock so gravity keeps working;
-    // Input is naturally zero without lock (movement possible without lock too — that's fine).
-    if (this.charCtrl) this.charCtrl.update(dt);
-    if (this.camCtrl) this.camCtrl.update(dt);
+    // Cinematic + weather + endings run every frame
+    const cineActive = !!(this.cinematic && this.cinematic.isActive());
+    if (this.cinematic) this.cinematic.update(dt);
+    if (this.weather && this.character) {
+      this.weather.update(dt, now, this.character.root.position);
+    }
+    if (this.endings) this.endings.update(dt, now);
 
-    // Phase 2 updates
+    // While a cinematic is active, freeze character + camera and reroute
+    // the interaction key (E) to skip the cinematic.
+    if (cineActive) {
+      if (this.character) {
+        this.character.velocity.set(0, 0, 0);
+        // Keep the character grounded and idle-animated so they don't freeze mid-stride.
+        const p = this.character.root.position;
+        p.y = sampleHeight(p.x, p.z);
+        this.character.updateAnimation(dt, 0, true, this.character.facingY);
+      }
+      if (this.input && this.input.consumeInteractPress()) {
+        this.cinematic.requestSkip();
+      }
+      // Clear any lingering interaction prompt from HUD
+      if (this.gameState) this.gameState.setActivePrompt('', null);
+    } else {
+      // Update character + camera regardless of pointer lock so gravity keeps working;
+      // Input is naturally zero without lock (movement possible without lock too — that's fine).
+      if (this.charCtrl) this.charCtrl.update(dt);
+      if (this.camCtrl) this.camCtrl.update(dt);
+    }
+
+    // Phase 2 updates (skip interactables while a cinematic is playing)
     if (this.gameState) this.gameState.update(dt);
-    if (this.interactables) this.interactables.update(dt);
+    if (this.interactables && !cineActive) this.interactables.update(dt);
     if (this.wildlife) this.wildlife.update(dt, this.character.root.position, this.character.velocity);
     if (this.puzzles) this.puzzles.update(dt, now);
+
+    // Autosave — every 30 seconds. Skip during cinematic/choice/ending.
+    this._autosaveTimer += dt;
+    if (this._autosaveTimer >= 30) {
+      this._autosaveTimer = 0;
+      const canSave = !cineActive
+        && !(this.endings && this.endings.active)
+        && this.gameState
+        && !this.gameState.endingResolved;
+      if (canSave) this._doAutosave();
+    }
 
     // Debug hotkey F4
     if (this.input && this.input.consumeDumpPress() && this.gameState) this.gameState.dumpDebug();

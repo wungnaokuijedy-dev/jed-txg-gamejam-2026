@@ -28,6 +28,12 @@ export class GameState {
     this.activePromptText = '';
     this.activePromptTargetId = null;
 
+    // Phase 3 — final choice + ending
+    this.choiceMade = null;         // 'take' | 'leave' | 'share' | null
+    this.endingKind = null;         // 'guardian' | 'balance' | 'silence' | null
+    this.endingResolved = false;
+    this.hudHidden = false;         // cinematic hides HUD
+
     // Smoothed mood lerp t = healthToMoodT (0 = cool/dawn, 1 = warm/healed)
     this._moodT = this._healthToMoodT(this.health);
     this._moodTTarget = this._moodT;
@@ -103,6 +109,32 @@ export class GameState {
     if (this.health >= 70) return 2;   // young tree
     if (this.health >= 40) return 1;   // sapling
     return 0;                          // sprout
+  }
+
+  // Final ending resolution. The choice is applied as a health modifier
+  // and the resulting band determines the ending — so gameplay history
+  // dominates the outcome, not the button pressed alone.
+  //   TAKE  -15   LEAVE +15   SHARE +5
+  //   >=75  guardian   40-74  balance   <40  silence
+  resolveEnding(choice) {
+    if (this.endingResolved) return this.endingKind;
+    const mod = choice === 'take' ? -15 : choice === 'leave' ? 15 : 5;
+    const finalHealth = Math.max(0, Math.min(100, this.health + mod));
+    const before = this.health;
+    this.health = finalHealth;
+    this._moodTTarget = this._healthToMoodT(this.health);
+    this.emit('health', { health: this.health, delta: finalHealth - before, reason: 'choice_' + choice });
+
+    let kind;
+    if (finalHealth >= 75) kind = 'guardian';
+    else if (finalHealth >= 40) kind = 'balance';
+    else kind = 'silence';
+
+    this.choiceMade = choice;
+    this.endingKind = kind;
+    this.endingResolved = true;
+    this.emit('choice_resolved', { choice, kind, finalHealth });
+    return kind;
   }
 
   update(dt) {

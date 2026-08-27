@@ -3,14 +3,10 @@ import { Game } from '../../game/Game.js';
 
 // Organic Forest Health icon that morphs sprout → sapling → young tree.
 function HealthTierIcon({ tier }) {
-  // 0 = sprout (two small leaves + short stem)
-  // 1 = sapling (thin trunk + a few small leaf tufts)
-  // 2 = young tree (trunk + rounded canopy)
+  // 0 = sprout, 1 = sapling, 2 = young tree
   return (
     <svg className="wnl-hud-tree-svg" width="42" height="52" viewBox="0 0 42 52" aria-label="Forest Health">
-      {/* Ground line */}
       <ellipse cx="21" cy="49" rx="14" ry="2" fill="rgba(20,32,20,0.55)" />
-      {/* Stem/trunk grows with tier */}
       <rect
         x="19.5" y={tier === 0 ? 40 : tier === 1 ? 32 : 22}
         width="3" height={tier === 0 ? 9 : tier === 1 ? 17 : 27}
@@ -38,7 +34,6 @@ function HealthTierIcon({ tier }) {
           <ellipse cx="13" cy="24" rx="7" ry="6" fill="#6ea86e" />
           <ellipse cx="30" cy="22" rx="7" ry="6" fill="#4a8a4a" />
           <ellipse cx="21" cy="10" rx="7" ry="6" fill="#8fc48f" />
-          {/* Gentle glow */}
           <ellipse cx="21" cy="18" rx="16" ry="14" fill="none" stroke="rgba(180,230,180,0.35)" strokeWidth="1.6" />
         </>
       )}
@@ -55,12 +50,20 @@ function SeedIcon() {
   );
 }
 
+// Choice option definitions (buttons + poetic consequence hint on hover/focus).
+const CHOICE_OPTIONS = [
+  { key: 'take',  label: 'Take',   hint: 'Its light could serve you.',           testid: 'choice-take-btn'  },
+  { key: 'leave', label: 'Leave',  hint: 'Let the forest keep its heart.',        testid: 'choice-leave-btn' },
+  { key: 'share', label: 'Share',  hint: 'Plant half. Carry half.',               testid: 'choice-share-btn' },
+];
+
 // Full-screen game shell. Handles:
 //   - loading screen with progress
 //   - click-to-play gate (also satisfies future audio autoplay policy)
 //   - paused overlay (when pointer lock is lost)
 //   - debug HUD (F3)
 //   - area-name toast when the player enters a new area
+//   - Phase 3: subtitles, final choice UI, end card, save/continue
 
 export default function GameApp() {
   const containerRef = useRef(null);
@@ -88,6 +91,15 @@ export default function GameApp() {
   const [tierFlashKey, setTierFlashKey] = useState(0);
   const prevSeedsRef = useRef(0);
   const prevTierRef = useRef(1);
+
+  // Phase 3 state
+  const [hasSave, setHasSave] = useState(false);
+  const [hudHidden, setHudHidden] = useState(false);
+  const [subtitle, setSubtitle] = useState('');
+  const subtitleTimerRef = useRef(null);
+  const [choiceOpen, setChoiceOpen] = useState(false);
+  const [hoveredChoice, setHoveredChoice] = useState(null);
+  const [ending, setEnding] = useState(null);   // { kind, message, choice }
 
   // Boot game on mount
   useEffect(() => {
@@ -132,14 +144,27 @@ export default function GameApp() {
         prevTierRef.current = snap.healthTier;
       },
       onLetterbox: (on) => { if (!cancelled) setLetterboxOn(!!on); },
+      // Phase 3 callbacks
+      onSaveState: ({ hasSave: hs }) => { if (!cancelled) setHasSave(!!hs); },
+      onHudHide: (on) => { if (!cancelled) setHudHidden(!!on); },
+      onSubtitle: ({ text, duration }) => {
+        if (cancelled) return;
+        if (subtitleTimerRef.current) { clearTimeout(subtitleTimerRef.current); subtitleTimerRef.current = null; }
+        setSubtitle(text || '');
+        if (text && duration && duration > 0) {
+          subtitleTimerRef.current = setTimeout(() => setSubtitle(''), duration * 1000);
+        }
+      },
+      onChoiceOpen: () => { if (!cancelled) { setChoiceOpen(true); setHoveredChoice(null); } },
+      onChoiceClose: () => { if (!cancelled) setChoiceOpen(false); },
+      onEnding: ({ kind, message, choice }) => { if (!cancelled) setEnding({ kind, message, choice }); },
     });
     gameRef.current = game;
 
     game.load().then(() => {
       if (cancelled) return;
       game.start();
-      // Expose the game to window for dev tooling / integration tests. Harmless
-      // in production; useful in headless testing.
+      // Expose the game to window for dev tooling / integration tests.
       try { window.__wnl = game; } catch (_) {}
     }).catch((e) => {
       if (!cancelled) setErrorMsg(e && e.message ? e.message : 'Failed to load');
@@ -148,6 +173,7 @@ export default function GameApp() {
     return () => {
       cancelled = true;
       if (areaBannerTimerRef.current) clearTimeout(areaBannerTimerRef.current);
+      if (subtitleTimerRef.current) clearTimeout(subtitleTimerRef.current);
       try { game.dispose(); } catch (_) {}
       gameRef.current = null;
     };
@@ -165,17 +191,62 @@ export default function GameApp() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const handlePlayClick = useCallback(async () => {
+  // Keyboard shortcuts for choice UI (1/2/3)
+  useEffect(() => {
+    if (!choiceOpen) return;
+    const onKey = (e) => {
+      if (e.repeat) return;
+      let choice = null;
+      if (e.code === 'Digit1' || e.code === 'Numpad1') choice = 'take';
+      else if (e.code === 'Digit2' || e.code === 'Numpad2') choice = 'leave';
+      else if (e.code === 'Digit3' || e.code === 'Numpad3') choice = 'share';
+      if (choice) {
+        e.preventDefault();
+        commitChoice(choice);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choiceOpen]);
+
+  const startGame = useCallback(async (mode) => {
     if (!gameRef.current) return;
-    // Pointer lock is best-effort. Enter play mode either way so keyboard controls work.
+    // 'resume' — just re-lock pointer, don't touch state.
+    if (mode === 'resume') {
+      try { await gameRef.current.requestPointerLock(); } catch (_) {}
+      return;
+    }
+    if (mode === 'continue') {
+      gameRef.current.applyLoadedSave();
+    } else {
+      gameRef.current.newGame();
+    }
     setPlaying(true);
     try { await gameRef.current.requestPointerLock(); } catch (_) {}
+    // Fresh runs get the opening cinematic. Continuing players skip it.
+    if (mode !== 'continue') {
+      gameRef.current.playOpening();
+    }
+  }, []);
+
+  const commitChoice = useCallback((choice) => {
+    if (!gameRef.current) return;
+    gameRef.current.resolveFinalChoice(choice);
+  }, []);
+
+  const handleReturnToWoods = useCallback(() => {
+    // Simplest & cleanest reset: reload. Save is already cleared.
+    window.location.reload();
   }, []);
 
   const showTitleGate = loaded && !playing;
   const showLoadingScreen = !loaded && !errorMsg;
-  // Resume overlay only makes sense if we actually had pointer lock once and lost it.
-  const showPauseOverlay = loaded && playing && everLocked && !pointerLocked && !errorMsg;
+  const showPauseOverlay = loaded && playing && everLocked && !pointerLocked && !errorMsg && !choiceOpen && !ending;
+
+  const endingLabel = ending
+    ? (ending.kind === 'guardian' ? 'The Guardian' : ending.kind === 'balance' ? 'The Balance' : 'The Silence')
+    : '';
 
   return (
     <div className="wnl-root">
@@ -185,7 +256,7 @@ export default function GameApp() {
       <div className="wnl-vignette" aria-hidden />
 
       {/* Area name banner */}
-      {areaBanner ? (
+      {areaBanner && !hudHidden && !choiceOpen && !ending ? (
         <div className="wnl-area-banner" data-testid="area-banner">
           <div className="wnl-area-banner-inner">
             <span className="wnl-area-banner-caret">—</span>
@@ -196,14 +267,12 @@ export default function GameApp() {
       ) : null}
 
       {/* ==== Phase 2 HUD ==== */}
-      {playing && loaded && !errorMsg && (
+      {playing && loaded && !errorMsg && !hudHidden && !ending && (
         <>
-          {/* Forest Health tier icon (top-left) */}
           <div className="wnl-hud-health" data-testid="health-hud">
             <HealthTierIcon key={tierFlashKey} tier={gameStateSnap.healthTier} />
           </div>
 
-          {/* Seeds counter (appears after first pickup) */}
           {gameStateSnap.seeds > 0 && (
             <div className="wnl-hud-seeds" data-testid="seeds-hud" key={seedFlashKey}>
               <SeedIcon />
@@ -211,15 +280,13 @@ export default function GameApp() {
             </div>
           )}
 
-          {/* Objective whisper (top-center, italic) */}
           {gameStateSnap.objective && (
             <div className="wnl-hud-objective" data-testid="objective-hud" key={gameStateSnap.objective}>
               {gameStateSnap.objective}
             </div>
           )}
 
-          {/* Interaction prompt (bottom-center) */}
-          {gameStateSnap.prompt && (
+          {gameStateSnap.prompt && !choiceOpen && (
             <div className="wnl-hud-prompt" data-testid="prompt-hud">
               {gameStateSnap.prompt}
             </div>
@@ -233,6 +300,66 @@ export default function GameApp() {
           <div className="wnl-letterbox wnl-letterbox-top" data-testid="letterbox-top" />
           <div className="wnl-letterbox wnl-letterbox-bottom" data-testid="letterbox-bottom" />
         </>
+      )}
+
+      {/* Subtitle overlay */}
+      {subtitle && (
+        <div className="wnl-subtitle" data-testid="subtitle-overlay" key={subtitle}>
+          {subtitle}
+        </div>
+      )}
+
+      {/* Skip cinematic hint */}
+      {hudHidden && !choiceOpen && !ending && playing && (
+        <div className="wnl-skip-hint" data-testid="skip-hint" aria-hidden>
+          <kbd>E</kbd> skip
+        </div>
+      )}
+
+      {/* Final choice overlay */}
+      {choiceOpen && (
+        <div className="wnl-choice" data-testid="choice-overlay">
+          <div className="wnl-choice-title">The Heartseed rests before you.</div>
+          <div className="wnl-choice-hint" data-testid="choice-hint">
+            {hoveredChoice
+              ? (CHOICE_OPTIONS.find((c) => c.key === hoveredChoice) || {}).hint
+              : 'Choose. The forest will remember.'}
+          </div>
+          <div className="wnl-choice-row">
+            {CHOICE_OPTIONS.map((opt, idx) => (
+              <button
+                key={opt.key}
+                className="wnl-choice-btn"
+                data-testid={opt.testid}
+                onMouseEnter={() => setHoveredChoice(opt.key)}
+                onMouseLeave={() => setHoveredChoice((k) => (k === opt.key ? null : k))}
+                onFocus={() => setHoveredChoice(opt.key)}
+                onBlur={() => setHoveredChoice((k) => (k === opt.key ? null : k))}
+                onClick={() => commitChoice(opt.key)}
+              >
+                <span className="wnl-choice-num">{idx + 1}</span>
+                <span className="wnl-choice-label">{opt.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Ending card */}
+      {ending && (
+        <div className="wnl-end-card" data-testid="ending-card">
+          <div className="wnl-end-kind" data-testid={`ending-kind-${ending.kind}`}>
+            {endingLabel}
+          </div>
+          <div className="wnl-end-message">{ending.message}</div>
+          <button
+            className="wnl-play-btn"
+            data-testid="ending-return-btn"
+            onClick={handleReturnToWoods}
+          >
+            Return to the Woods
+          </button>
+        </div>
       )}
 
       {/* Loading screen */}
@@ -265,18 +392,31 @@ export default function GameApp() {
             <span className="wnl-title-line3">LEADS</span>
           </div>
           <p className="wnl-title-sub">A quiet walk in the woods.</p>
-          <button
-            className="wnl-play-btn"
-            onClick={handlePlayClick}
-            data-testid="click-to-play-btn"
-          >
-            Click to Play
-          </button>
+          <div className="wnl-title-actions">
+            {hasSave && (
+              <button
+                className="wnl-play-btn"
+                onClick={() => startGame('continue')}
+                data-testid="title-continue-btn"
+              >
+                Continue
+              </button>
+            )}
+            <button
+              className="wnl-play-btn"
+              onClick={() => startGame('new')}
+              data-testid={hasSave ? 'title-new-game-btn' : 'click-to-play-btn'}
+            >
+              {hasSave ? 'New Walk' : 'Click to Play'}
+            </button>
+          </div>
           <div className="wnl-title-controls">
             <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</div>
             <div><kbd>Shift</kbd> sprint</div>
             <div><kbd>Space</kbd> jump</div>
-            <div><kbd>Mouse</kbd> look · <kbd>Esc</kbd> release</div>
+            <div><kbd>E</kbd> interact</div>
+            <div><kbd>Mouse</kbd> look</div>
+            <div><kbd>Esc</kbd> release</div>
           </div>
         </div>
       )}
@@ -289,7 +429,7 @@ export default function GameApp() {
             <p className="wnl-pause-hint">Pointer released. Click to resume your walk.</p>
             <button
               className="wnl-play-btn"
-              onClick={handlePlayClick}
+              onClick={() => startGame('resume')}
               data-testid="click-to-resume-btn"
             >
               Click to Resume

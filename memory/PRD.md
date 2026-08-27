@@ -88,3 +88,36 @@ Jam judge / player on a desktop Chrome browser. No authentication. No accounts.
 - **F4 debug hotkey** (dev only) dumps GameState to console.
 - **`window.__wnl` exposed** so integration tests can inspect/teleport without affecting production. Not surfaced in UI.
 
+
+
+## Phase 3 additions (Feb 2026 — this session)
+- **`Cinematic.js`**: sequencer that owns camera per-frame while active; freezes character, letterboxes, hides HUD, emits subtitles and time-based triggers, E-to-skip after a per-cinematic `minSkipT`. Four prebuilt cinematics — **opening** (10s sky glide down to the heroine, skippable immediately), **vineGrowth** (6.5s framing shot after Puzzle 1), **guardianRevelation** (22s slow push toward the giant grove tree with 4 timed subtitles), **heartChoiceArc** (6s orbit around heroine+Heartseed, keeps letterbox for the choice UI), **ending** (26s rising rotate over the Heart, chained per outcome).
+- **`Weather.js`**: additive-blend rain point-sprite system in a 24m box around the player, dampened intensity toward a `_targetIntensity`. Stages: `clear | mist | rain_light | clearing | break`. **Weather is tied to STORY BEATS, not areas** — `mist` at start → `rain_light` when Puzzle 1 (vine bridge) is solved → `clearing` when the Heart gate opens → ending override (Silence: `mist`, Balance: `clearing`, Guardian: `break`). `rain_heavy` intentionally skipped for perf/readability.
+- **`Endings.js`**: three distinct scene effects.
+  - **Guardian** — luminous stag manifests in front of the heart tree, aura + upward glowing motes, mood forced toward `WARM_HEALED`.
+  - **Balance** — faint stag silhouette barely visible in mist, quiet mood.
+  - **Silence** — fireflies gutter out (uniform color fades toward black), mood forced fully cool grey, fawn walks away over 20s.
+- **`Save.js`**: versioned localStorage under key `wnl_save_v1`. Saves `{health, seeds, flags, doneInteractions, objective, moodT, weatherStage, pos, facingY}`. `Puzzles.applySavedState()` re-runs the visual side (vine bridge grown, stream flowing, stones glowing, heart gate opened) on Continue so the world matches the flags. Endings-seen counted separately in `wnl_endings_seen`. **Autosave** every 30s in game loop plus event-driven on flag/seed changes; suppressed during cinematic/choice/ending so a save never captures a half-cinematic state. Save is cleared after each ending.
+- **GameState extensions**: `choiceMade`, `endingKind`, `endingResolved`, `hudHidden`, `resolveEnding(choice)`. Ending band uses **accumulated forest health + choice modifier** (TAKE -15, LEAVE +15, SHARE +5) → bands `>=75 Guardian`, `40-74 Balance`, `<40 Silence`. This means all three choices can lead to different endings depending on how the player played the whole run.
+- **Heartseed** interactable at the center of Area 5 (glowing gold icosahedron on a mossy stump with additive halo). Available only after `heart_reached`. On interact, delegates to `Game.startFinalChoiceSequence()` which plays the arc cinematic and, at t=1.5s into the arc, fades the choice UI in and **releases pointer lock** so the player can click Take / Leave / Share (or press 1 / 2 / 3). Hover / keyboard focus reveals a one-line poetic consequence hint ("Its light could serve you." / "Let the forest keep its heart." / "Plant half. Carry half.") with a smooth crossfade.
+- **UI overlays (`GameApp.jsx`)**: subtitle overlay above the bottom letterbox with per-line duration; `E skip` hint bottom-right while HUD is hidden; final-choice modal with three pill buttons (numbered ①②③) + poetic hint + 1/2/3 keyboard shortcuts; ending card fades in with `THE GUARDIAN | THE BALANCE | THE SILENCE` label and its poetic closing line, plus a `Return to the Woods` button that reloads to the title. Title gate now shows both a **Continue** button (only if a save exists) and a **New Walk** button (which wipes the save).
+- **Ending → title flow**: after the ending card, the player clicks Return to the Woods → page reloads → title screen shows a fresh state (save was cleared) but the `wnl_endings_seen` record persists across runs for future collection UI in Phase 4.
+
+## Phase 3 acceptance — verified via in-browser scripted tests
+1. LEAVE at health 30 → 45 → Balance ending ✓
+2. TAKE at health 20 → 5 → Silence ending, `endings_seen = {"silence":1}` ✓
+3. SHARE at health 85 → 90 → Guardian ending, `endings_seen = {"guardian":1}` ✓
+4. Weather transitions: initial `mist` → `rain_light` after grow_done ✓
+5. Save / Continue: save present after flag set; reload shows Continue button; clicking Continue restores flags and player position ✓
+6. Pointer lock released when choice UI opens (fixes mouse-click) ✓
+7. Save cleared after ending ✓
+8. Cinematic E-to-skip works during opening (immediate) and after 3s for others ✓
+9. Choice UI hover shows correct poetic hint for each option ✓
+10. Ending card shows correct kind label and poetic message ✓
+
+## Known limitations / Phase 4 backlog
+- No audio yet (ambient bed / footsteps / stingers / ending sting).
+- No main menu / options screen (settings, mouse sensitivity slider, brightness).
+- Ending-seen record in localStorage isn't yet surfaced in a collection UI.
+- Continue restores flags + player pos but doesn't currently replay the vine cinematic — visual state (bridge grown, stream flowing, stones glowing, gate opened) is fast-forwarded via `Puzzles.applySavedState()`.
+- Heart choice arc camera framing is decent but the giant heart-tree trunk still occasionally clips the composition on very tall trunks — acceptable for jam quality.

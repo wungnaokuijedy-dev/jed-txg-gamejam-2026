@@ -23,18 +23,22 @@ export class CameraController {
     this.minPitch = -1.3;
     this.maxPitch = 0.55;
 
-    this.distance = 5.5;
+    this.baseDistance = 5.5;
+    this.sprintDistance = 6.6;   // wider view when running
+    this.distance = this.baseDistance;
     this.minDistance = 1.6;
     this.currentDistance = this.distance;
 
     this.sensitivity = 0.0025;
-    this.followSpeed = 12;      // damp per second
+    this.followSpeed = 12;
+
+    // Handheld sway state (very small amplitudes to avoid motion sickness)
+    this._swayT = 0;
 
     // Working state
     this._smoothedPos = new THREE.Vector3();
     this._smoothedTarget = new THREE.Vector3();
 
-    // Initialize immediately at character position (avoid first-frame snap).
     this._smoothedTarget.copy(character.root.position).y += 1.55;
     this._recomputeTarget();
     this._smoothedPos.copy(_targetPos);
@@ -58,6 +62,12 @@ export class CameraController {
     this._smoothedTarget.x = THREE.MathUtils.damp(this._smoothedTarget.x, _headPos.x, this.followSpeed, dt);
     this._smoothedTarget.y = THREE.MathUtils.damp(this._smoothedTarget.y, _headPos.y, this.followSpeed, dt);
     this._smoothedTarget.z = THREE.MathUtils.damp(this._smoothedTarget.z, _headPos.z, this.followSpeed, dt);
+
+    // Widen distance when sprinting (speed-based)
+    const speed = Math.hypot(this.character.velocity.x, this.character.velocity.z);
+    const sprintBlend = THREE.MathUtils.clamp((speed - 3.5) / 3.0, 0, 1);
+    const distTarget = THREE.MathUtils.lerp(this.baseDistance, this.sprintDistance, sprintBlend);
+    this.distance = THREE.MathUtils.damp(this.distance, distTarget, 3, dt);
 
     // Desired camera pos in spherical coords around target
     this._recomputeTarget();
@@ -96,7 +106,17 @@ export class CameraController {
     this._smoothedPos.y = THREE.MathUtils.damp(this._smoothedPos.y, _targetPos.y, this.followSpeed, dt);
     this._smoothedPos.z = THREE.MathUtils.damp(this._smoothedPos.z, _targetPos.z, this.followSpeed, dt);
 
-    this.camera.position.copy(this._smoothedPos);
+    // Subtle handheld sway while moving (tiny amplitude, no motion sickness)
+    this._swayT += dt * (1.6 + sprintBlend * 1.0);
+    const swayAmp = Math.min(1, speed / 5.5) * 0.02;
+    const swayX = Math.sin(this._swayT) * swayAmp;
+    const swayY = Math.sin(this._swayT * 2.0 + 0.6) * swayAmp * 0.7;
+
+    this.camera.position.set(
+      this._smoothedPos.x + swayX,
+      this._smoothedPos.y + swayY,
+      this._smoothedPos.z
+    );
     this.camera.lookAt(this._smoothedTarget);
   }
 

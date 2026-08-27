@@ -1,58 +1,282 @@
-// Procedural low-poly female adventurer + hand-rolled animation.
-// - No skeletal rigs, no external models. Body parts are Groups so we can rotate
-//   them around their pivots (shoulder / hip / knee / elbow).
-// - Public API kept stable for CharacterController: root / model / body / headPivot /
-//   shoulderL / shoulderR / elbowL / elbowR / hipL / hipR / kneeL / kneeR /
-//   updateAnimation(dt, speedNormalized, grounded, movingDirYaw) / triggerSquash(amount) /
-//   facingY / position / velocity / grounded.
+// Procedural low-poly-yet-smooth female adventurer.
+// - NO downloaded models. Body is a hierarchy of smooth capsule/lathe/sphere
+//   primitives shaded with MeshStandardMaterial (flatShading OFF).
+// - The face is painted at runtime onto a CanvasTexture — this is what sells
+//   "anime". Getting expressive eyes with geometry alone reads uncanny.
+// - Rig public API is stable so CharacterController.js needs no changes:
+//     root / model / body / headPivot / shoulderL / shoulderR / elbowL / elbowR /
+//     hipL / hipR / kneeL / kneeR / updateAnimation(dt, speedNormalized, grounded, movingDirYaw) /
+//     triggerSquash(amount) / facingY / position / velocity / grounded
 //
-// Design cues:
-//   Young adult female explorer, practical (not chibi, not sexualized). Signature
-//   feature: long dark ponytail with 4 chained segments simulated as angular springs,
-//   so it lags on movement and drifts on wind. Face is deliberately kept as two
-//   elongated eye slits + a soft fringe — trying to sculpt anime facial geometry
-//   at low-poly is uncanny; suggestion beats detail.
-//
-//   Rig is structured so future kneel/inspect poses can override joint rotations
-//   without changing the mesh layout.
-//
-// Feet at y = 0; hips pivot at y = 0.95; stature ≈ 1.75m.
+//  Animation improvements over the previous pass:
+//    - Stride frequency is proportional to actual horizontal speed
+//      (walk stride ~1.35 m, run stride ~1.75 m). Kills foot sliding.
+//    - Leg/arm swing AMPLITUDE scales with moveBlend, so legs blend smoothly
+//      to a neutral standing pose at rest (no frozen mid-stride).
+//    - Body leans slightly into turns (yawRate) and into acceleration.
+//    - Small anticipation crouch is triggered by CharacterController on jump takeoff;
+//      landing squash on ground impact. Both decay smoothly.
+//    - Ponytail 4-segment angular-spring chain with lag + whip + wind.
 
 import * as THREE from 'three';
 
 // ==== Palette ====
-const SKIN         = 0xf2c9a8;
-const HAIR         = 0x1f1613;
+const SKIN         = 0xf5cfae;
+const SKIN_DARK    = 0xd8a684;
+const HAIR         = 0x1e1512;
+const HAIR_HL      = 0x3a2a22;
 const HAIR_TIE     = 0x8a3a2a;
-const JACKET       = 0xe8dcc0;   // light cream/beige
-const JACKET_DARK  = 0xc9b98c;   // sleeves & trim
-const JACKET_TRIM  = 0x8a7a58;   // seams & waistband
-const SHORTS       = 0x2a2118;   // dark shorts
-const BOOT         = 0x1a1108;
+const JACKET       = 0xf0e3c7;   // light cream
+const JACKET_DARK  = 0xc9b98c;   // sleeve trim
+const JACKET_TRIM  = 0x8a7a58;
+const SHIRT        = 0x6b8c9a;   // teal shirt under jacket
+const SHORTS       = 0x2f2620;
+const BELT         = 0x4a3a2c;
+const BOOT         = 0x22160f;
+const BOOT_SOLE    = 0x1a0d08;
 const BACKPACK     = 0x6b4a2d;
 const STRAP        = 0x3a2a1c;
 const GLOVE        = 0x2a2018;
-const EYE          = 0x140a06;
 
-function box(w, h, d, color, cast = true) {
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, flatShading: true });
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+// -------- helpers --------
+function stdMat(color, roughness = 0.75, flat = false) {
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness: 0.0, flatShading: flat });
+}
+function meshFrom(geo, mat, cast = true) {
+  const m = new THREE.Mesh(geo, mat);
   m.castShadow = cast;
   return m;
 }
-function sphere(r, color, segs = 12, flat = true, cast = true) {
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, flatShading: flat });
-  const m = new THREE.Mesh(new THREE.SphereGeometry(r, segs, Math.max(6, Math.floor(segs * 0.8))), mat);
-  m.castShadow = cast;
-  return m;
+function capsule(radius, length, color, radialSegs = 12, capSegs = 6, cast = true) {
+  const geo = new THREE.CapsuleGeometry(radius, length, capSegs, radialSegs);
+  return meshFrom(geo, stdMat(color), cast);
 }
-function cyl(rTop, rBot, h, color, radialSegs = 8, cast = true) {
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, flatShading: true });
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, radialSegs, 1), mat);
-  m.castShadow = cast;
-  return m;
+function sphereMesh(radius, color, segs = 16, cast = true) {
+  const geo = new THREE.SphereGeometry(radius, segs, Math.max(8, Math.floor(segs * 0.75)));
+  return meshFrom(geo, stdMat(color), cast);
 }
 
+// -------- Face texture (canvas-painted) --------
+function makeFaceTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+
+  // Base skin — solid so the head has no ugly seams anywhere
+  ctx.fillStyle = '#f5cfae';
+  ctx.fillRect(0, 0, 512, 512);
+
+  // Subtle skin gradient — slightly darker toward jaw / temples
+  const grad = ctx.createRadialGradient(256, 220, 100, 256, 220, 260);
+  grad.addColorStop(0, 'rgba(245,207,174,1)');
+  grad.addColorStop(1, 'rgba(215,170,132,1)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 512);
+
+  // Features live in the front-ish U range so seams (at U=0/1 = back of head) stay clean.
+  const cx = 256;
+  const cy = 250;
+  const eyeY = cy + 22;    // eyes slightly below head equator so bangs above don't cover them
+  const eyeSpacingX = 60;
+
+  // --- Blush cheeks (soft, painted first so eyes overlay cleanly) ---
+  ctx.save();
+  ctx.filter = 'blur(6px)';
+  for (const dir of [-1, 1]) {
+    const cxi = cx + dir * 92;
+    const g = ctx.createRadialGradient(cxi, cy + 34, 4, cxi, cy + 34, 32);
+    g.addColorStop(0, 'rgba(240,155,150,0.55)');
+    g.addColorStop(1, 'rgba(240,155,150,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cxi, cy + 34, 32, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // --- Eyebrows (thin gentle arches, dark brown) ---
+  ctx.strokeStyle = '#241a15';
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+  for (const dir of [-1, 1]) {
+    const ex = cx + dir * eyeSpacingX;
+    ctx.beginPath();
+    ctx.moveTo(ex - 22, eyeY - 48);
+    ctx.quadraticCurveTo(ex, eyeY - 58 - Math.abs(dir) * 2, ex + 22 * dir * 0 + 22, eyeY - 44);
+    ctx.stroke();
+  }
+
+  // --- Eyes (large anime-style) ---
+  for (const dir of [-1, 1]) {
+    const ex = cx + dir * eyeSpacingX;
+
+    // Eye whites
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(ex, eyeY, 24, 32, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Upper lash line (thick black arc)
+    ctx.strokeStyle = '#0a0605';
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.ellipse(ex, eyeY, 24, 32, 0, Math.PI * 1.02, Math.PI * 1.98);
+    ctx.stroke();
+
+    // Iris (warm brown radial)
+    const irisGrad = ctx.createRadialGradient(ex, eyeY, 3, ex, eyeY, 20);
+    irisGrad.addColorStop(0, '#4a2f18');
+    irisGrad.addColorStop(0.8, '#2a1a0e');
+    irisGrad.addColorStop(1, '#150a05');
+    ctx.fillStyle = irisGrad;
+    ctx.beginPath();
+    ctx.ellipse(ex, eyeY + 2, 18, 24, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pupil
+    ctx.fillStyle = '#0a0605';
+    ctx.beginPath();
+    ctx.ellipse(ex, eyeY + 2, 6, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bright highlights (this is the anime magic — big + small)
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(ex - 6, eyeY - 8, 6, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(ex + 7, eyeY + 12, 3, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lower lash hint (thin)
+    ctx.strokeStyle = 'rgba(20,10,8,0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(ex, eyeY, 24, 32, 0, Math.PI * 0.05, Math.PI * 0.95);
+    ctx.stroke();
+  }
+
+  // --- Nose hint (very subtle dot shadow) ---
+  ctx.fillStyle = 'rgba(180,120,100,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 30, 3, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- Mouth (small smile) ---
+  ctx.strokeStyle = '#a3453a';
+  ctx.lineWidth = 3.2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - 13, cy + 68);
+  ctx.quadraticCurveTo(cx, cy + 76, cx + 13, cy + 68);
+  ctx.stroke();
+  // Lower-lip subtle shade
+  ctx.fillStyle = 'rgba(215,140,120,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 73, 10, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// -------- Torso profile (LatheGeometry) --------
+function makeTorsoLathe(color) {
+  const p = (x, y) => new THREE.Vector2(x, y);
+  const pts = [
+    p(0.001, -0.32),
+    p(0.16,  -0.31),
+    p(0.19,  -0.22),   // hip flare
+    p(0.185, -0.10),
+    p(0.155,  0.02),   // waist cinch
+    p(0.180,  0.16),
+    p(0.200,  0.28),   // chest widest
+    p(0.185,  0.36),
+    p(0.140,  0.40),   // shoulder ring
+    p(0.085,  0.43),   // neck base
+    p(0.001,  0.44),
+  ];
+  const geo = new THREE.LatheGeometry(pts, 24);
+  geo.computeVertexNormals();
+  const mat = stdMat(color, 0.85, false);
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = true;
+  m.receiveShadow = false;
+  return m;
+}
+
+// -------- Boot: shaft + toe --------
+function makeBoot() {
+  const g = new THREE.Group();
+  // Shaft (cylinder-ish)
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.075, 0.09, 0.24, 14),
+    stdMat(BOOT, 0.8, false)
+  );
+  shaft.position.y = -0.16;
+  shaft.castShadow = true;
+  g.add(shaft);
+
+  // Ankle cuff (JACKET_TRIM)
+  const cuff = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.088, 0.045, 14),
+    stdMat(JACKET_TRIM, 0.85, false)
+  );
+  cuff.position.y = -0.05;
+  cuff.castShadow = true;
+  g.add(cuff);
+
+  // Toe (ellipsoid extruding forward)
+  const toe = new THREE.Mesh(
+    new THREE.SphereGeometry(0.11, 12, 10),
+    stdMat(BOOT, 0.85, false)
+  );
+  toe.scale.set(0.85, 0.55, 1.5);
+  toe.position.set(0, -0.29, 0.075);
+  toe.castShadow = true;
+  g.add(toe);
+
+  // Sole (darker thin box)
+  const sole = new THREE.Mesh(
+    new THREE.BoxGeometry(0.18, 0.03, 0.28),
+    stdMat(BOOT_SOLE, 1.0, true)
+  );
+  sole.position.set(0, -0.325, 0.05);
+  sole.castShadow = true;
+  g.add(sole);
+
+  return g;
+}
+
+// -------- Mitten hand --------
+function makeHand() {
+  const g = new THREE.Group();
+  const palm = new THREE.Mesh(
+    new THREE.SphereGeometry(0.055, 10, 8),
+    stdMat(GLOVE, 0.85, false)
+  );
+  palm.scale.set(0.9, 1.1, 1.25);
+  palm.castShadow = true;
+  g.add(palm);
+  // Thumb bump on the side
+  const thumb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.028, 8, 6),
+    stdMat(GLOVE, 0.85, false)
+  );
+  thumb.position.set(0.05, 0.005, 0.03);
+  thumb.scale.set(0.7, 1.0, 1.1);
+  thumb.castShadow = true;
+  g.add(thumb);
+  return g;
+}
+
+// ============================================================
+// Character
+// ============================================================
 export class Character {
   constructor() {
     this.root = new THREE.Group();
@@ -61,175 +285,216 @@ export class Character {
     this.model = new THREE.Group();
     this.root.add(this.model);
 
-    // Body / hips group (position + squash live here).
+    // Body pivot at hip height so feet reach y=0
     this.body = new THREE.Group();
     this.body.position.y = 0.95;
     this.model.add(this.body);
 
     // ============================================================
-    // TORSO — cream jacket, subtle waist cinch (narrower box + belt)
+    // TORSO — cream jacket, subtle female form via lathe
     // ============================================================
-    const torso = box(0.42, 0.58, 0.24, JACKET);
-    torso.position.y = 0.04;
+    const torso = makeTorsoLathe(JACKET);
     this.body.add(torso);
 
-    // Waist band (darker) — cinches silhouette a touch, reads as female without curves.
-    const waist = box(0.44, 0.06, 0.26, JACKET_TRIM);
-    waist.position.y = -0.24;
-    this.body.add(waist);
+    // Under-shirt teal collar peeking at the neck (small ring)
+    const collarRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.075, 0.02, 8, 20),
+      stdMat(SHIRT, 0.85, false)
+    );
+    collarRing.rotation.x = Math.PI / 2;
+    collarRing.position.y = 0.42;
+    this.body.add(collarRing);
 
-    // Jacket seam down the front
-    const seam = box(0.018, 0.5, 0.006, JACKET_TRIM);
-    seam.position.set(0, 0.04, 0.122);
+    // Front jacket seam (darker vertical line)
+    const seam = meshFrom(new THREE.BoxGeometry(0.012, 0.65, 0.008), stdMat(JACKET_TRIM, 1.0, true));
+    seam.position.set(0, 0.06, 0.19);
     this.body.add(seam);
 
-    // Collar (V-shape hint) — two tiny angled boxes at the neck opening
-    const collarL = box(0.1, 0.05, 0.02, JACKET_DARK);
-    collarL.position.set(-0.06, 0.31, 0.11);
-    collarL.rotation.z = 0.5;
-    this.body.add(collarL);
-    const collarR = collarL.clone();
-    collarR.material = collarL.material;
-    collarR.position.x = 0.06;
-    collarR.rotation.z = -0.5;
-    this.body.add(collarR);
+    // Belt (darker band at waist)
+    const belt = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.163, 0.163, 0.05, 20),
+      stdMat(BELT, 0.85, false)
+    );
+    belt.position.y = -0.02;
+    belt.castShadow = true;
+    this.body.add(belt);
+    // Belt buckle
+    const buckle = meshFrom(new THREE.BoxGeometry(0.05, 0.04, 0.02), stdMat(JACKET_TRIM, 0.4, false));
+    buckle.position.set(0, -0.02, 0.166);
+    this.body.add(buckle);
 
-    // Hood (down, resting on the back)
-    const hood = box(0.38, 0.16, 0.24, JACKET);
-    hood.position.set(0, 0.34, -0.14);
-    hood.rotation.x = -0.28;
+    // Hood (down, on the back — smooth ellipsoid volume)
+    const hood = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 14, 10),
+      stdMat(JACKET, 0.85, false)
+    );
+    hood.scale.set(1.05, 0.75, 1.15);
+    hood.position.set(0, 0.33, -0.15);
+    hood.castShadow = true;
     this.body.add(hood);
-    const hoodTrim = box(0.4, 0.03, 0.25, JACKET_TRIM);
-    hoodTrim.position.set(0, 0.32, -0.03);
-    hoodTrim.rotation.x = -0.28;
+    // Hood trim (darker rim ring)
+    const hoodTrim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.14, 0.022, 6, 18),
+      stdMat(JACKET_TRIM, 0.9, false)
+    );
+    hoodTrim.rotation.x = Math.PI / 2 - 0.35;
+    hoodTrim.position.set(0, 0.4, -0.05);
     this.body.add(hoodTrim);
 
     // ============================================================
-    // BACKPACK
+    // BACKPACK — smoother rounded shape
     // ============================================================
-    const pack = box(0.36, 0.44, 0.2, BACKPACK);
-    pack.position.set(0, 0.06, -0.22);
-    this.body.add(pack);
-    // Flap / straps
-    const flap = box(0.34, 0.14, 0.03, STRAP);
-    flap.position.set(0, 0.25, -0.31);
+    const packBody = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, 0.44, 0.2),
+      stdMat(BACKPACK, 0.85, false)
+    );
+    packBody.position.set(0, 0.05, -0.24);
+    packBody.castShadow = true;
+    this.body.add(packBody);
+
+    // Rounded flap top
+    const flapTop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.17, 10, 8),
+      stdMat(BACKPACK, 0.85, false)
+    );
+    flapTop.scale.set(1.0, 0.4, 0.6);
+    flapTop.position.set(0, 0.27, -0.28);
+    flapTop.castShadow = true;
+    this.body.add(flapTop);
+    // Flap face (darker)
+    const flap = meshFrom(new THREE.BoxGeometry(0.32, 0.14, 0.03), stdMat(STRAP, 0.85, true));
+    flap.position.set(0, 0.24, -0.34);
     this.body.add(flap);
+    // Buckle-like small square on flap
+    const packBuckle = meshFrom(new THREE.BoxGeometry(0.06, 0.05, 0.02), stdMat(JACKET_TRIM, 0.4, false));
+    packBuckle.position.set(0, 0.17, -0.36);
+    this.body.add(packBuckle);
+
+    // Straps
     for (const dx of [-0.16, 0.16]) {
-      const s = box(0.06, 0.5, 0.04, STRAP);
+      const s = new THREE.Mesh(
+        new THREE.BoxGeometry(0.06, 0.5, 0.04),
+        stdMat(STRAP, 0.9, true)
+      );
       s.position.set(dx, 0.06, -0.01);
+      s.castShadow = true;
       this.body.add(s);
     }
 
     // ============================================================
-    // HEAD + FACE
+    // HEAD  (smooth sphere + canvas face texture)
     // ============================================================
     this.headPivot = new THREE.Group();
     this.headPivot.position.set(0, 0.5, 0);
     this.body.add(this.headPivot);
 
-    // Head (slightly squashed sphere, skin, smooth so face reads soft)
+    const faceTex = makeFaceTexture();
+    const headMat = new THREE.MeshStandardMaterial({
+      map: faceTex,
+      color: 0xffffff,
+      roughness: 0.55,
+      metalness: 0.0,
+      flatShading: false,
+    });
     const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.14, 16, 14),
-      new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.55, flatShading: false })
+      new THREE.SphereGeometry(0.145, 24, 20),
+      headMat
     );
-    head.scale.set(0.98, 1.04, 0.96);
-    head.position.y = 0.13;
+    head.scale.set(0.96, 1.05, 0.96);
+    head.position.y = 0.14;
+    // Rotate around Y so canvas texture "middle" faces forward (+Z local).
+    head.rotation.y = -Math.PI / 2;
     head.castShadow = true;
     this.headPivot.add(head);
 
-    // Hair back — larger dark sphere covering the crown + back of head.
-    // Offset back slightly so face front stays visible.
-    const hairBack = new THREE.Mesh(
-      new THREE.SphereGeometry(0.155, 14, 12),
-      new THREE.MeshStandardMaterial({ color: HAIR, roughness: 0.9, flatShading: true })
+    // ---- Hair volume on the skull (dark ellipsoid over back/top) ----
+    const skullHair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.155, 20, 16),
+      stdMat(HAIR, 0.85, false)
     );
-    hairBack.scale.set(1.05, 1.02, 1.15);
-    hairBack.position.set(0, 0.145, -0.025);
-    hairBack.castShadow = true;
-    this.headPivot.add(hairBack);
+    skullHair.scale.set(1.05, 1.02, 1.15);
+    skullHair.position.set(0, 0.16, -0.025);
+    skullHair.castShadow = true;
+    this.headPivot.add(skullHair);
 
-    // Fringe (bangs) — a short forward-leaning box across the forehead, split
-    // into two side chunks so the middle of the forehead peeks through.
-    const bangCenter = box(0.16, 0.09, 0.05, HAIR);
-    bangCenter.position.set(0, 0.205, 0.11);
-    bangCenter.rotation.x = -0.28;
+    // Trim of skull hair (small darker cluster on top for highlight)
+    const skullHL = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 12, 10),
+      stdMat(HAIR_HL, 0.9, false)
+    );
+    skullHL.scale.set(1.6, 0.6, 1.3);
+    skullHL.position.set(0, 0.24, -0.03);
+    skullHL.castShadow = true;
+    this.headPivot.add(skullHL);
+
+    // ---- Fringe (bangs) ----
+    // Positioned high on the forehead + forward on Z so they never occlude the eyes.
+    const bangMat = stdMat(HAIR, 0.85, false);
+    const bangGeoCenter = new THREE.SphereGeometry(0.11, 12, 10);
+    const bangCenter = new THREE.Mesh(bangGeoCenter, bangMat);
+    bangCenter.scale.set(1.3, 0.45, 0.55);
+    bangCenter.position.set(0, 0.26, 0.11);
+    bangCenter.rotation.x = -0.35;
+    bangCenter.castShadow = true;
     this.headPivot.add(bangCenter);
-    for (const dx of [-0.11, 0.11]) {
-      const bangSide = box(0.08, 0.13, 0.06, HAIR);
-      bangSide.position.set(dx, 0.18, 0.09);
-      bangSide.rotation.x = -0.2;
-      bangSide.rotation.z = dx < 0 ? 0.35 : -0.35;
-      this.headPivot.add(bangSide);
+
+    for (const dx of [-0.09, 0.09]) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), bangMat);
+      b.scale.set(0.7, 1.1, 0.5);
+      b.position.set(dx, 0.22, 0.11);
+      b.rotation.x = -0.25;
+      b.rotation.z = dx < 0 ? 0.4 : -0.4;
+      b.castShadow = true;
+      this.headPivot.add(b);
     }
 
-    // Side face-framing strands running down past the jaw
-    for (const dx of [-0.135, 0.135]) {
-      const strand = box(0.05, 0.28, 0.07, HAIR);
+    // ---- Side hair strands framing the face ----
+    for (const dx of [-0.14, 0.14]) {
+      const strand = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.028, 0.24, 4, 8),
+        bangMat
+      );
       strand.position.set(dx, 0.02, 0.03);
-      strand.rotation.z = dx < 0 ? 0.12 : -0.12;
+      strand.rotation.z = dx < 0 ? 0.14 : -0.14;
+      strand.castShadow = true;
       this.headPivot.add(strand);
     }
 
-    // Face features (anime-style suggestion, not detailed geometry).
-    // Two dark elongated eye slits + soft brow marks.
-    for (const dx of [-0.055, 0.055]) {
-      const eye = new THREE.Mesh(
-        new THREE.BoxGeometry(0.035, 0.02, 0.006),
-        new THREE.MeshBasicMaterial({ color: EYE })
-      );
-      eye.position.set(dx, 0.135, 0.132);
-      eye.rotation.z = dx < 0 ? -0.06 : 0.06;
-      this.headPivot.add(eye);
-      // Brow (thin dark line above)
-      const brow = new THREE.Mesh(
-        new THREE.BoxGeometry(0.04, 0.008, 0.006),
-        new THREE.MeshBasicMaterial({ color: EYE })
-      );
-      brow.position.set(dx, 0.168, 0.128);
-      brow.rotation.z = dx < 0 ? -0.05 : 0.05;
-      this.headPivot.add(brow);
-    }
-    // Subtle blush cheek dots (very small skin-tone bumps darker) — skip for readability
-    // Small mouth (a tiny darker line, kept subtle)
-    const mouth = new THREE.Mesh(
-      new THREE.BoxGeometry(0.03, 0.006, 0.005),
-      new THREE.MeshBasicMaterial({ color: 0x8a4a3a })
-    );
-    mouth.position.set(0, 0.085, 0.135);
-    this.headPivot.add(mouth);
-
     // ============================================================
-    // PONYTAIL — chained angular springs
+    // PONYTAIL (4-segment angular-spring chain)
     // ============================================================
-    // Base group is attached to the BACK of the head and rests drooping down + back.
     this.ponytailBase = new THREE.Group();
-    this.ponytailBase.position.set(0, 0.18, -0.12);
-    this.ponytailBase.rotation.x = 0.55; // natural droop backward
+    this.ponytailBase.position.set(0, 0.19, -0.13);
+    this.ponytailBase.rotation.x = 0.55;
     this.headPivot.add(this.ponytailBase);
 
-    // Hair tie ribbon (dark red) at the base
-    const tie = box(0.11, 0.06, 0.11, HAIR_TIE);
-    tie.position.set(0, -0.02, 0);
+    // Hair tie (small torus, darker red)
+    const tie = new THREE.Mesh(
+      new THREE.TorusGeometry(0.055, 0.02, 6, 14),
+      stdMat(HAIR_TIE, 0.7, false)
+    );
+    tie.rotation.x = Math.PI / 2;
+    tie.position.y = -0.02;
     this.ponytailBase.add(tie);
 
-    // Four tapering segments as a nested chain.
-    // Each segment rotates around X/Z at its top pivot; child pivots hang at its tip.
     this.ponytailSegments = [];
-    const segLens   = [0.22, 0.22, 0.22, 0.22];
-    const segRadii  = [[0.058, 0.05], [0.05, 0.042], [0.042, 0.032], [0.032, 0.018]];
+    const segLens   = [0.22, 0.22, 0.22, 0.24];
+    const segRadii  = [[0.06, 0.05], [0.05, 0.042], [0.042, 0.032], [0.032, 0.014]];
     const stiffness = [80, 65, 50, 38];
     const damping   = [6.5, 6.0, 5.5, 5.0];
-    const gravBias  = [0.35, 0.4, 0.42, 0.44];   // small extra static droop per segment
-    const inertia   = [3.5, 4.5, 5.5, 6.5];      // response-to-velocity factor
-
+    const inertia   = [3.5, 4.5, 5.5, 6.5];
     let parentPivot = this.ponytailBase;
+    const ponyMat = stdMat(HAIR, 0.85, false);
     for (let i = 0; i < 4; i++) {
       const seg = new THREE.Group();
-      const mesh = cyl(segRadii[i][0], segRadii[i][1], segLens[i], HAIR, 8);
+      const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(segRadii[i][0], segRadii[i][1], segLens[i], 12, 1),
+        ponyMat
+      );
       mesh.position.y = -segLens[i] / 2;
+      mesh.castShadow = true;
       seg.add(mesh);
       parentPivot.add(seg);
-      // Next pivot at the tip of this segment
       const nextPivot = new THREE.Group();
       nextPivot.position.y = -segLens[i];
       seg.add(nextPivot);
@@ -238,7 +503,6 @@ export class Character {
         length: segLens[i],
         stiffness: stiffness[i],
         damping: damping[i],
-        gravBias: gravBias[i],
         inertia: inertia[i],
         angleX: 0, angleZ: 0,
         velX: 0,   velZ: 0,
@@ -247,79 +511,62 @@ export class Character {
     }
 
     // ============================================================
-    // ARMS — shoulder groups
+    // ARMS
     // ============================================================
     this.shoulderL = new THREE.Group();
     this.shoulderR = new THREE.Group();
-    this.shoulderL.position.set(-0.27, 0.26, 0);
-    this.shoulderR.position.set( 0.27, 0.26, 0);
+    this.shoulderL.position.set(-0.24, 0.32, 0);
+    this.shoulderR.position.set( 0.24, 0.32, 0);
     this.body.add(this.shoulderL);
     this.body.add(this.shoulderR);
 
-    // Small shoulder caps (cream) that stay attached to the body when arm swings
-    for (const dx of [-0.24, 0.24]) {
-      const cap = new THREE.Mesh(
-        new THREE.SphereGeometry(0.09, 10, 8),
-        new THREE.MeshStandardMaterial({ color: JACKET, roughness: 0.85, flatShading: true })
-      );
-      cap.scale.set(1, 0.85, 1);
-      cap.position.set(dx, 0.28, 0);
-      cap.castShadow = true;
-      this.body.add(cap);
+    // Upper arm (capsule)
+    for (const shoulder of [this.shoulderL, this.shoulderR]) {
+      const upper = capsule(0.052, 0.28, JACKET, 12, 6);
+      upper.position.y = -0.16;
+      shoulder.add(upper);
+    }
+    // Elbow group (bent slightly by default in animation)
+    this.elbowL = new THREE.Group(); this.elbowL.position.y = -0.32; this.shoulderL.add(this.elbowL);
+    this.elbowR = new THREE.Group(); this.elbowR.position.y = -0.32; this.shoulderR.add(this.elbowR);
+
+    // Forearm (slightly darker jacket cuff)
+    for (const elbow of [this.elbowL, this.elbowR]) {
+      const forearm = capsule(0.046, 0.24, JACKET_DARK, 12, 6);
+      forearm.position.y = -0.14;
+      elbow.add(forearm);
     }
 
-    const upperArmL = box(0.11, 0.34, 0.11, JACKET);
-    upperArmL.position.y = -0.17;
-    this.shoulderL.add(upperArmL);
-    const upperArmR = box(0.11, 0.34, 0.11, JACKET);
-    upperArmR.position.y = -0.17;
-    this.shoulderR.add(upperArmR);
-
-    // Elbows (bent slightly by default in updateAnimation)
-    this.elbowL = new THREE.Group(); this.elbowL.position.y = -0.34; this.shoulderL.add(this.elbowL);
-    this.elbowR = new THREE.Group(); this.elbowR.position.y = -0.34; this.shoulderR.add(this.elbowR);
-
-    // Forearms in slightly darker jacket-sleeve color
-    const forearmL = box(0.1, 0.3, 0.1, JACKET_DARK);
-    forearmL.position.y = -0.15;
-    this.elbowL.add(forearmL);
-    const forearmR = box(0.1, 0.3, 0.1, JACKET_DARK);
-    forearmR.position.y = -0.15;
-    this.elbowR.add(forearmR);
-
-    // Gloved hands
-    const handL = new THREE.Mesh(
-      new THREE.SphereGeometry(0.068, 8, 8),
-      new THREE.MeshStandardMaterial({ color: GLOVE, roughness: 0.85, flatShading: true })
-    );
-    handL.scale.set(0.9, 1.0, 1.2);
-    handL.position.y = -0.32;
-    handL.castShadow = true;
-    this.elbowL.add(handL);
-    const handR = handL.clone(); handR.material = handL.material; this.elbowR.add(handR);
+    // Hands (mitten-style)
+    for (const elbow of [this.elbowL, this.elbowR]) {
+      const hand = makeHand();
+      hand.position.y = -0.31;
+      elbow.add(hand);
+    }
 
     // ============================================================
-    // LEGS — hip groups pivot at (±0.11, 0, 0)
+    // LEGS
     // ============================================================
     this.hipL = new THREE.Group();
     this.hipR = new THREE.Group();
-    this.hipL.position.set(-0.11, -0.3, 0);
-    this.hipR.position.set( 0.11, -0.3, 0);
+    this.hipL.position.set(-0.10, -0.3, 0);
+    this.hipR.position.set( 0.10, -0.3, 0);
     this.body.add(this.hipL);
     this.body.add(this.hipR);
 
-    // Upper leg (dark shorts)
-    const upperLegL = box(0.15, 0.4, 0.16, SHORTS);
-    upperLegL.position.y = -0.2;
-    this.hipL.add(upperLegL);
-    const upperLegR = box(0.15, 0.4, 0.16, SHORTS);
-    upperLegR.position.y = -0.2;
-    this.hipR.add(upperLegR);
-
-    // Shorts hem (a slightly wider dark trim at bottom of shorts)
+    // Upper leg (shorts) — capsule
     for (const hip of [this.hipL, this.hipR]) {
-      const hem = box(0.17, 0.05, 0.17, JACKET_TRIM);
-      hem.position.y = -0.38;
+      const upper = capsule(0.078, 0.32, SHORTS, 12, 6);
+      upper.position.y = -0.19;
+      hip.add(upper);
+    }
+    // Shorts hem trim (small darker band)
+    for (const hip of [this.hipL, this.hipR]) {
+      const hem = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.088, 0.09, 0.04, 14),
+        stdMat(JACKET_TRIM, 0.9, false)
+      );
+      hem.position.y = -0.36;
       hip.add(hem);
     }
 
@@ -327,22 +574,17 @@ export class Character {
     this.kneeL = new THREE.Group(); this.kneeL.position.y = -0.4; this.hipL.add(this.kneeL);
     this.kneeR = new THREE.Group(); this.kneeR.position.y = -0.4; this.hipR.add(this.kneeR);
 
-    // Lower legs (bare skin, calves)
-    const lowerLegL = box(0.12, 0.28, 0.13, SKIN);
-    lowerLegL.position.y = -0.14;
-    this.kneeL.add(lowerLegL);
-    const lowerLegR = box(0.12, 0.28, 0.13, SKIN);
-    lowerLegR.position.y = -0.14;
-    this.kneeR.add(lowerLegR);
-
-    // Boots — taller than before to cover ankle
+    // Lower leg (bare skin capsule)
     for (const knee of [this.kneeL, this.kneeR]) {
-      const boot = box(0.17, 0.16, 0.24, BOOT);
-      boot.position.set(0, -0.33, 0.04);
+      const lower = capsule(0.058, 0.2, SKIN, 12, 6);
+      lower.position.y = -0.14;
+      knee.add(lower);
+    }
+    // Boot
+    for (const knee of [this.kneeL, this.kneeR]) {
+      const boot = makeBoot();
+      boot.position.y = -0.13;
       knee.add(boot);
-      const cuff = box(0.19, 0.04, 0.19, JACKET_TRIM);
-      cuff.position.set(0, -0.26, 0);
-      knee.add(cuff);
     }
 
     // ============================================================
@@ -352,20 +594,30 @@ export class Character {
     this.moveBlend = 0;
     this.airBlend = 0;
     this.squash = 0;
+
     this.facingY = 0;
     this.prevFacingY = 0;
 
+    // Body-lean state (smoothly damped)
+    this.leanX = 0; // pitch — forward lean into acceleration
+    this.leanZ = 0; // roll  — into turns
+
+    // Speed history for stride-frequency + lean-into-accel
+    this._lastSpeedForAccel = 0;
+
+    // Public physics facing fields
     this.position = this.root.position;
     this.grounded = true;
     this.velocity = new THREE.Vector3();
 
-    // Rest angles for hair sway restoring force (unused for now — 0 is the rest).
+    // Precompute local right/forward for ponytail forces
+    this._facingRunSpeed = 6.5;   // used for speed normalization heuristics
   }
 
-  // dt = seconds since last frame
-  // speedNormalized = horizontal speed / runSpeed (approx 0..1+)
+  // dt = seconds
+  // speedNormalized = horizSpeed / runSpeed
   // grounded = bool
-  // movingDirYaw = radians (or null) — desired body heading in world space
+  // movingDirYaw = radians (or null)
   updateAnimation(dt, speedNormalized, grounded, movingDirYaw) {
     // ---- Blends ----
     const targetMove = Math.min(1.2, speedNormalized);
@@ -373,12 +625,17 @@ export class Character {
     this.airBlend  = THREE.MathUtils.damp(this.airBlend, grounded ? 0 : 1, 10, dt);
     this.squash    = THREE.MathUtils.damp(this.squash, 0, 6, dt);
 
-    // ---- Walk-cycle phase advance ----
-    const freq = 6 + this.moveBlend * 4;
-    this.phase += dt * freq * Math.max(0.001, this.moveBlend);
-    if (!grounded) this.phase *= 0.985;
+    // Actual horizontal speed (for stride)
+    const horizSpeed = speedNormalized * this._facingRunSpeed;
 
-    // ---- Facing: smooth yaw toward desired heading ----
+    // ---- Stride: frequency proportional to speed. Kills sliding. ----
+    // stride length blends between walk (1.35m for full cycle) and run (1.75m).
+    const gaitBlend  = THREE.MathUtils.clamp(speedNormalized / 0.7, 0, 1);
+    const strideCyc  = THREE.MathUtils.lerp(1.35, 1.75, gaitBlend); // meters per full cycle
+    const cyclesPerS = grounded ? Math.max(0.0, horizSpeed / strideCyc) : 0.0;
+    this.phase += dt * cyclesPerS * Math.PI * 2;
+
+    // ---- Facing: smooth toward target (max ~12 rad/s) ----
     this.prevFacingY = this.facingY;
     if (movingDirYaw !== null && movingDirYaw !== undefined) {
       let diff = movingDirYaw - this.facingY;
@@ -389,87 +646,83 @@ export class Character {
     }
     this.model.rotation.y = this.facingY;
 
-    // ---- Poses ----
     const t = performance.now() * 0.001;
-    const idleBob  = Math.sin(t * 1.6) * 0.015;
-    const idleSway = Math.sin(t * 0.9) * 0.04;
+    const idleBob  = Math.sin(t * 1.6) * 0.012;
+    const idleSway = Math.sin(t * 0.9) * 0.035;
 
-    const armSwing = 0.35 + this.moveBlend * 0.7;
-    const legSwing = 0.45 + this.moveBlend * 0.75;
+    // ---- Amplitudes scale with moveBlend so legs blend to neutral at rest ----
+    const legSwingAmp = 0.78 * this.moveBlend + 0.05 * this.moveBlend * this.moveBlend;
+    const armSwingAmp = 0.68 * this.moveBlend;
     const swing    = Math.sin(this.phase);
     const swingCos = Math.cos(this.phase);
 
-    // Body vertical bob / squash
-    const walkBob  = Math.abs(Math.sin(this.phase)) * 0.06 * this.moveBlend;
-    const scaleY   = 1 - this.squash * 0.25 - this.airBlend * 0.02;
+    // Body bob during walk/run
+    const walkBob  = Math.abs(Math.sin(this.phase * 2)) * 0.04 * this.moveBlend;
+    // Squash + air stretch
+    const scaleY   = 1 - this.squash * 0.25 - this.airBlend * 0.03;
     const scaleXZ  = 1 + this.squash * 0.18;
     this.body.scale.set(scaleXZ, scaleY, scaleXZ);
     this.body.position.y = 0.95 + idleBob * (1 - this.moveBlend) + walkBob;
 
-    // Arms — opposite of legs
-    this.shoulderL.rotation.x = swing * armSwing + this.airBlend * -0.6;
-    this.shoulderR.rotation.x = -swing * armSwing + this.airBlend * -0.6;
+    // ---- Body lean into turns + acceleration ----
+    let yawRate = (this.facingY - this.prevFacingY) / Math.max(dt, 1e-4);
+    while (yawRate >  Math.PI / dt) yawRate -= (Math.PI * 2) / dt;
+    while (yawRate < -Math.PI / dt) yawRate += (Math.PI * 2) / dt;
+    const accelRaw = (horizSpeed - this._lastSpeedForAccel) / Math.max(dt, 1e-4);
+    this._lastSpeedForAccel = horizSpeed;
+
+    // Damp lean targets
+    const leanZTarget = THREE.MathUtils.clamp(-yawRate * 0.06, -0.22, 0.22);
+    const leanXTarget = THREE.MathUtils.clamp(accelRaw * 0.02, -0.14, 0.14) * this.moveBlend;
+    this.leanZ = THREE.MathUtils.damp(this.leanZ, leanZTarget, 6, dt);
+    this.leanX = THREE.MathUtils.damp(this.leanX, leanXTarget, 6, dt);
+    this.body.rotation.z = this.leanZ;
+    this.body.rotation.x = this.leanX;
+
+    // ---- Arms — opposite of legs, blended to neutral at rest ----
+    this.shoulderL.rotation.x =  swing * armSwingAmp + this.airBlend * -0.6;
+    this.shoulderR.rotation.x = -swing * armSwingAmp + this.airBlend * -0.6;
     this.shoulderL.rotation.z = 0.05 + idleSway * (1 - this.moveBlend);
     this.shoulderR.rotation.z = -0.05 - idleSway * (1 - this.moveBlend);
-    const elbowBend = 0.2 + this.moveBlend * 0.5;
+    const elbowBend = 0.15 + this.moveBlend * 0.6;
     this.elbowL.rotation.x = elbowBend;
     this.elbowR.rotation.x = elbowBend;
 
-    // Legs
-    this.hipL.rotation.x = -swing * legSwing + this.airBlend * 0.25;
-    this.hipR.rotation.x =  swing * legSwing + this.airBlend * 0.4;
-    this.kneeL.rotation.x = Math.max(0,  swingCos) * 0.55 * this.moveBlend + this.airBlend * 0.3;
+    // ---- Legs — opposite of arms, kills mid-stride freeze at rest ----
+    this.hipL.rotation.x = -swing * legSwingAmp + this.airBlend * 0.28;
+    this.hipR.rotation.x =  swing * legSwingAmp + this.airBlend * 0.42;
+    // Knee bend on back-swing
+    this.kneeL.rotation.x = Math.max(0,  swingCos) * 0.55 * this.moveBlend + this.airBlend * 0.35;
     this.kneeR.rotation.x = Math.max(0, -swingCos) * 0.55 * this.moveBlend + this.airBlend * 0.5;
 
-    // Head — tuck forward in air, gentle idle sway otherwise
-    this.headPivot.rotation.x = -0.05 + this.airBlend * 0.2 + Math.sin(t * 1.4) * 0.02 * (1 - this.moveBlend);
-    this.headPivot.rotation.z = idleSway * 0.15 * (1 - this.moveBlend);
+    // ---- Head — tuck slightly in air, gentle idle look ----
+    this.headPivot.rotation.x = -0.05 + this.airBlend * 0.22 + Math.sin(t * 1.4) * 0.02 * (1 - this.moveBlend);
+    this.headPivot.rotation.z = idleSway * 0.15 * (1 - this.moveBlend) + this.leanZ * -0.35;
 
-    // ---- PONYTAIL SIM ----
-    this._updatePonytail(dt, t);
+    // ---- Ponytail secondary motion ----
+    this._updatePonytail(dt, t, yawRate);
   }
 
-  // Angular-spring chain driven by:
-  //   - restoring force toward rest (0 rad, base already droops via ponytailBase rotation)
-  //   - damping
-  //   - character horizontal velocity converted to local space (inertial lag)
-  //   - subtle wind noise
-  //   - rotational impulse when the model yaws quickly (whip effect)
-  _updatePonytail(dt, tNow) {
+  _updatePonytail(dt, tNow, yawRate) {
     if (dt <= 0) return;
-    const step = Math.min(dt, 1 / 30);   // cap to avoid instability on hitchy frames
+    const step = Math.min(dt, 1 / 30);
 
-    // Character horizontal velocity in world space
-    const wvx = this.velocity.x;
-    const wvz = this.velocity.z;
-    // Body local space (facingY rotates model, so world -> local: rotate by -facingY)
+    // World velocity → character-local (facingY rotates model, so world→local = rotate by -facingY)
+    const wvx = this.velocity.x, wvz = this.velocity.z;
     const fy = this.facingY;
     const cosY = Math.cos(fy), sinY = Math.sin(fy);
-    // World (x, z) into character-local (local +Z = character front).
     const localVX =  wvx * cosY - wvz * sinY;
     const localVZ =  wvx * sinY + wvz * cosY;
 
-    // Rotational impulse from yaw rate
-    let yawRate = (this.facingY - this.prevFacingY) / step;
-    // wrap
-    while (yawRate >  Math.PI / step) yawRate -= (Math.PI * 2) / step;
-    while (yawRate < -Math.PI / step) yawRate += (Math.PI * 2) / step;
-
-    // Wind (idle)
+    // Idle wind noise
     const wnX = Math.sin(tNow * 0.7)  * 0.35 + Math.sin(tNow * 1.9 + 1.2) * 0.15;
     const wnZ = Math.cos(tNow * 0.55) * 0.30 + Math.sin(tNow * 1.5 + 0.4) * 0.18;
 
     for (let i = 0; i < this.ponytailSegments.length; i++) {
       const s = this.ponytailSegments[i];
-
-      // Target external accelerations:
-      //   forward movement (localVZ > 0)  → tail lags backward → +angleX  (rotation.x positive)
-      //   rightward movement (localVX > 0) → tail lags leftward → -angleZ (rotation.z negative)
-      //   yawRate > 0 (turning left in three.js Y-up right-handed) → tail lags right → +angleZ
-      const extX = s.inertia * localVZ * 0.35 + wnX * (0.6 + i * 0.1);
+      const extX =  s.inertia * localVZ * 0.35 + wnX * (0.6 + i * 0.1);
       const extZ = -s.inertia * localVX * 0.35 + yawRate * (0.6 + i * 0.15) + wnZ * (0.5 + i * 0.1);
 
-      // Spring physics: acc = -k*x - c*v + ext
       const accX = -s.stiffness * s.angleX - s.damping * s.velX + extX;
       const accZ = -s.stiffness * s.angleZ - s.damping * s.velZ + extZ;
 
@@ -478,15 +731,12 @@ export class Character {
       s.angleX += s.velX * step;
       s.angleZ += s.velZ * step;
 
-      // Clamp to reasonable range so it never breaks the silhouette (~55°)
       const CLAMP = 0.95;
       if (s.angleX >  CLAMP) { s.angleX =  CLAMP; s.velX *= -0.2; }
       if (s.angleX < -CLAMP) { s.angleX = -CLAMP; s.velX *= -0.2; }
       if (s.angleZ >  CLAMP) { s.angleZ =  CLAMP; s.velZ *= -0.2; }
       if (s.angleZ < -CLAMP) { s.angleZ = -CLAMP; s.velZ *= -0.2; }
 
-      // Apply. Note: rotation.x positive => segment tip tilts to -Z (backward on character);
-      // rotation.z positive => tip tilts to +X (right of character).
       s.group.rotation.x = s.angleX;
       s.group.rotation.z = s.angleZ;
     }

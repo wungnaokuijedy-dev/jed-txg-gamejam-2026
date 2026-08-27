@@ -7,25 +7,29 @@ export const MOODS = {
   DAWN_COOL: {
     id: 'dawn_cool',
     // Sky gradient (top -> horizon)
-    skyTop: new THREE.Color('#3a5d6b'),
-    skyHorizon: new THREE.Color('#8fb4a8'),
-    skyGround: new THREE.Color('#2a3a3a'),
+    skyTop: new THREE.Color('#4c6f7c'),
+    skyHorizon: new THREE.Color('#a9c9be'),
+    skyGround: new THREE.Color('#3c4a44'),
     // Fog
-    fogColor: new THREE.Color('#7ba098'),
-    fogDensity: 0.028,
-    // Directional sun
-    sunColor: new THREE.Color('#f4e6c8'),
-    sunIntensity: 1.35,
-    sunDirection: new THREE.Vector3(-0.55, 0.75, 0.45).normalize(),
-    // Hemisphere
-    hemiSky: new THREE.Color('#7fa4a4'),
-    hemiGround: new THREE.Color('#2f3a2a'),
-    hemiIntensity: 0.55,
+    fogColor: new THREE.Color('#9cc0b8'),
+    fogDensity: 0.020,
+    // Directional sun (softer golden, more readable)
+    sunColor: new THREE.Color('#fbe6bc'),
+    sunIntensity: 1.55,
+    sunDirection: new THREE.Vector3(-0.55, 0.85, 0.4).normalize(),
+    // Hemisphere — warmer bounce so the scene reads bright
+    hemiSky: new THREE.Color('#a5c4c0'),
+    hemiGround: new THREE.Color('#5a4a3a'),
+    hemiIntensity: 0.85,
     // Ambient tint applied to terrain
-    groundTint: new THREE.Color('#dcece0'),
+    groundTint: new THREE.Color('#e6f0e0'),
     // Grass/tree base tints (multiplied with per-instance color)
-    foliageTint: new THREE.Color('#c8dcc8'),
-    trunkTint: new THREE.Color('#c8b39a'),
+    foliageTint: new THREE.Color('#d0dcc8'),
+    trunkTint: new THREE.Color('#d2bfa6'),
+    // Fill light behind the character for rim separation
+    fillDirection: new THREE.Vector3(0.6, 0.55, -0.55).normalize(),
+    fillColor: new THREE.Color('#b0d8e0'),
+    fillIntensity: 0.35,
   },
   WARM_HEALED: {
     id: 'warm_healed',

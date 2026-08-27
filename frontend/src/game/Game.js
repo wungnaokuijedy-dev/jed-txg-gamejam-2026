@@ -8,7 +8,7 @@ import { CharacterController } from './CharacterController.js';
 import { CameraController } from './CameraController.js';
 import { buildTerrainMesh, sampleHeight, AREAS, currentAreaName } from './Terrain.js';
 import { buildVegetation } from './Vegetation.js';
-import { buildSky, buildDistantMountains, buildMist, buildLeaves } from './Atmosphere.js';
+import { buildSky, buildDistantMountains, buildMist, buildLeaves, buildFireflies, buildPollen, buildGodRays, buildBirds, updateBirds } from './Atmosphere.js';
 import { MOODS } from './Mood.js';
 
 export class Game {
@@ -44,6 +44,8 @@ export class Game {
       throw e;
     }
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(container.clientWidth, container.clientHeight, false);
     renderer.shadowMap.enabled = true;
@@ -114,6 +116,14 @@ export class Game {
     this.scene.add(this.mist);
     this.leaves = buildLeaves(this.mood);
     this.scene.add(this.leaves);
+    this.fireflies = buildFireflies(this.mood);
+    this.scene.add(this.fireflies);
+    this.pollen = buildPollen(this.mood);
+    this.scene.add(this.pollen);
+    this.godRays = buildGodRays(this.mood);
+    this.scene.add(this.godRays);
+    this.birds = buildBirds(this.mood);
+    this.scene.add(this.birds);
 
     this._reportProgress(0.9, 'Waking the explorer');
     await yieldToUI();
@@ -142,7 +152,6 @@ export class Game {
     sun.castShadow = true;
     sun.shadow.mapSize.width = 1024;
     sun.shadow.mapSize.height = 1024;
-    // Tight shadow frustum following player will be updated per frame.
     const cam = sun.shadow.camera;
     cam.left = -25; cam.right = 25; cam.top = 25; cam.bottom = -25;
     cam.near = 0.5; cam.far = 80;
@@ -152,8 +161,19 @@ export class Game {
     this.scene.add(sun.target);
     this.sun = sun;
 
-    // A single small warm point at the Heart clearing hints at destination
-    const heart = new THREE.PointLight(0xffd8a0, 0.9, 22, 2);
+    // Rim / fill light: dim directional from the opposite side of the sun,
+    // shadowless, so the heroine's silhouette catches a rim highlight and
+    // never goes muddy-dark against the forest.
+    if (this.mood.fillDirection) {
+      const fill = new THREE.DirectionalLight(this.mood.fillColor || 0xffffff, this.mood.fillIntensity || 0.3);
+      fill.castShadow = false;
+      this.scene.add(fill);
+      this.scene.add(fill.target);
+      this.fill = fill;
+    }
+
+    // Warm point light hinting at the Heart clearing
+    const heart = new THREE.PointLight(0xffd8a0, 1.0, 24, 2);
     const a5 = AREAS[4];
     heart.position.set(a5.center[0], sampleHeight(a5.center[0], a5.center[1]) + 8, a5.center[1]);
     this.scene.add(heart);
@@ -215,6 +235,18 @@ export class Game {
       mat.uniforms.uTime.value = now;
       mat.uniforms.uPlayer.value.copy(this.character.root.position);
     }
+    if (this.fireflies && this.fireflies.userData.material) {
+      this.fireflies.userData.material.uniforms.uTime.value = now;
+    }
+    if (this.pollen && this.pollen.userData.material) {
+      const mat = this.pollen.userData.material;
+      mat.uniforms.uTime.value = now;
+      mat.uniforms.uPlayer.value.copy(this.character.root.position);
+    }
+    if (this.godRays && this.godRays.userData.material) {
+      this.godRays.userData.material.uniforms.uTime.value = now;
+    }
+    if (this.birds) updateBirds(this.birds, now);
 
     // Sun shadow frustum follows player
     if (this.sun) {
@@ -223,6 +255,13 @@ export class Game {
       this.sun.position.set(p.x + dir.x * 30, p.y + dir.y * 30, p.z + dir.z * 30);
       this.sun.target.position.set(p.x, p.y, p.z);
       this.sun.target.updateMatrixWorld();
+    }
+    if (this.fill && this.mood.fillDirection) {
+      const p = this.character.root.position;
+      const d = this.mood.fillDirection;
+      this.fill.position.set(p.x + d.x * 20, p.y + d.y * 20, p.z + d.z * 20);
+      this.fill.target.position.set(p.x, p.y, p.z);
+      this.fill.target.updateMatrixWorld();
     }
     // Keep sky centered on camera
     if (this.sky) this.sky.position.copy(this.camera.position);

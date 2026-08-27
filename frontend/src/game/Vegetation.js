@@ -72,11 +72,24 @@ function makeTreeGeometries(variant) {
     foliageGeos.push(new THREE.IcosahedronGeometry(1.7, 0).translate(0, 3.6, 0));
     foliageGeos.push(new THREE.IcosahedronGeometry(1.2, 0).translate(0.7, 4.1, 0.3));
     foliageGeos.push(new THREE.IcosahedronGeometry(1.1, 0).translate(-0.6, 4.0, -0.3));
-  } else {
+  } else if (variant === 2) {
     // Twisted old tree — slight lean, flatter canopy
     trunkGeos.push(new THREE.CylinderGeometry(0.28, 0.42, 4.2, 7)
       .rotateZ(0.08).translate(0.1, 2.1, 0));
     foliageGeos.push(new THREE.IcosahedronGeometry(1.9, 0).scale(1.2, 0.7, 1.2).translate(0.1, 4.4, 0));
+  } else if (variant === 3) {
+    // Birch — tall slender, taller than pine, sparse canopy up high
+    trunkGeos.push(new THREE.CylinderGeometry(0.12, 0.18, 7.2, 8).translate(0, 3.6, 0));
+    foliageGeos.push(new THREE.IcosahedronGeometry(1.0, 0).translate(0, 6.6, 0));
+    foliageGeos.push(new THREE.IcosahedronGeometry(0.85, 0).translate(0.5, 7.2, 0.2));
+    foliageGeos.push(new THREE.IcosahedronGeometry(0.75, 0).translate(-0.45, 7.5, -0.2));
+  } else {
+    // Big canopy — low broad tree, lots of foliage volume
+    trunkGeos.push(new THREE.CylinderGeometry(0.45, 0.6, 2.6, 8).translate(0, 1.3, 0));
+    foliageGeos.push(new THREE.IcosahedronGeometry(2.4, 1).scale(1.15, 0.85, 1.1).translate(0, 3.6, 0));
+    foliageGeos.push(new THREE.IcosahedronGeometry(1.6, 0).translate(1.0, 3.9, 0.6));
+    foliageGeos.push(new THREE.IcosahedronGeometry(1.5, 0).translate(-0.9, 4.0, -0.4));
+    foliageGeos.push(new THREE.IcosahedronGeometry(1.3, 0).translate(0.4, 4.3, -0.9));
   }
   const trunkGeo = mergeGeometries(trunkGeos);
   const foliageGeo = mergeGeometries(foliageGeos);
@@ -125,17 +138,25 @@ export function buildVegetation(mood) {
     color: new THREE.Color(0x6d4a2f).multiply(mood.trunkTint),
     roughness: 0.95, flatShading: true,
   });
+  // Birch has a pale silvery trunk with dark bark marks (approximated as flat lighter tint)
+  const birchTrunkMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xd6cfc0).multiply(mood.trunkTint),
+    roughness: 0.85, flatShading: true,
+  });
   const foliageMatA = makeSwayMaterial(new THREE.Color(0x4f7d55).multiply(mood.foliageTint), { swayAmount: 0.035, swayFreq: 1.2 });
   const foliageMatB = makeSwayMaterial(new THREE.Color(0x628f5a).multiply(mood.foliageTint), { swayAmount: 0.04, swayFreq: 1.35 });
   const foliageMatC = makeSwayMaterial(new THREE.Color(0x4a6a4a).multiply(mood.foliageTint), { swayAmount: 0.03, swayFreq: 1.1 });
-  swayMaterials.push(foliageMatA, foliageMatB, foliageMatC);
+  const foliageMatD = makeSwayMaterial(new THREE.Color(0x8fb082).multiply(mood.foliageTint), { swayAmount: 0.045, swayFreq: 1.5 });
+  const foliageMatE = makeSwayMaterial(new THREE.Color(0x5c8560).multiply(mood.foliageTint), { swayAmount: 0.033, swayFreq: 1.25 });
+  swayMaterials.push(foliageMatA, foliageMatB, foliageMatC, foliageMatD, foliageMatE);
 
   // Prebuild variants
-  const variants = [makeTreeGeometries(0), makeTreeGeometries(1), makeTreeGeometries(2)];
-  const foliageMats = [foliageMatA, foliageMatB, foliageMatC];
+  const variants = [makeTreeGeometries(0), makeTreeGeometries(1), makeTreeGeometries(2), makeTreeGeometries(3), makeTreeGeometries(4)];
+  const foliageMats = [foliageMatA, foliageMatB, foliageMatC, foliageMatD, foliageMatE];
+  const trunkMats   = [trunkMat,    trunkMat,    trunkMat,    birchTrunkMat, trunkMat];
 
   // Sample scatter points across the map, biased by area.
-  const treeCounts = [220, 180, 140]; // per variant
+  const treeCounts = [220, 180, 140, 90, 70]; // per variant — total 700 trees
 
   const placedTrees = []; // {x, z, variant, scale}
 
@@ -200,15 +221,16 @@ export function buildVegetation(mood) {
     if (insideArea(x, z, 4) && Math.hypot(x - AREAS[4].center[0], z - AREAS[4].center[1]) < 8) continue;
 
     // Bias variant selection by area:
-    // Area 1 (Entrance) — mostly tall pines (variant 0)
-    // Area 2 (Whispering Woods) — dense mix, favor variant 2 twisted
-    // Area 4 (Ancient Grove) — variant 2 heavy
+    // Area 1 (Entrance) — mostly tall pines (variant 0) + some birch (3)
+    // Area 2 (Whispering Woods) — dense mix, favor variant 2 twisted + variant 4 big canopy
+    // Area 4 (Ancient Grove) — variant 2 heavy + variant 4
     let vChoice;
     const r = rng();
-    if (insideArea(x, z, 0)) vChoice = r < 0.75 ? 0 : (r < 0.9 ? 1 : 2);
-    else if (insideArea(x, z, 1)) vChoice = r < 0.35 ? 0 : (r < 0.6 ? 1 : 2);
-    else if (insideArea(x, z, 3)) vChoice = r < 0.15 ? 0 : (r < 0.4 ? 1 : 2);
-    else vChoice = r < 0.4 ? 0 : (r < 0.75 ? 1 : 2);
+    if (insideArea(x, z, 0))      vChoice = r < 0.60 ? 0 : (r < 0.72 ? 1 : (r < 0.90 ? 3 : 2));
+    else if (insideArea(x, z, 1)) vChoice = r < 0.30 ? 0 : (r < 0.55 ? 1 : (r < 0.85 ? 2 : 4));
+    else if (insideArea(x, z, 3)) vChoice = r < 0.15 ? 0 : (r < 0.40 ? 1 : (r < 0.75 ? 2 : 4));
+    else if (insideArea(x, z, 4)) vChoice = r < 0.20 ? 0 : (r < 0.55 ? 3 : (r < 0.85 ? 1 : 4));
+    else                          vChoice = r < 0.30 ? 0 : (r < 0.55 ? 1 : (r < 0.75 ? 2 : (r < 0.9 ? 3 : 4)));
     if (variantTargets[vChoice] <= 0) {
       // Retry with any variant that still has quota
       const remaining = variantTargets.map((v, i) => v > 0 ? i : -1).filter(i => i >= 0);
@@ -224,14 +246,14 @@ export function buildVegetation(mood) {
   }
 
   // Build InstancedMeshes for each variant × (trunk / foliage)
-  const perVariant = [[], [], []];
+  const perVariant = [[], [], [], [], []];
   for (const t of placedTrees) perVariant[t.variant].push(t);
 
-  for (let v = 0; v < 3; v++) {
+  for (let v = 0; v < 5; v++) {
     const list = perVariant[v];
     if (!list.length) continue;
     const { trunkGeo, foliageGeo } = variants[v];
-    const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, list.length);
+    const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMats[v], list.length);
     const foliageMesh = new THREE.InstancedMesh(foliageGeo, foliageMats[v], list.length);
     trunkMesh.castShadow = true;
     foliageMesh.castShadow = true;
@@ -361,6 +383,120 @@ export function buildVegetation(mood) {
     im.instanceMatrix.needsUpdate = true;
     group.add(im);
   }
+
+
+  // ==== BUSHES (small ellipsoid clusters, instanced) ====
+  {
+    const bushMat = makeSwayMaterial(new THREE.Color(0x4a6a48).multiply(mood.foliageTint), { swayAmount: 0.06, swayFreq: 1.6 });
+    swayMaterials.push(bushMat);
+    const bushGeoParts = [
+      new THREE.IcosahedronGeometry(0.32, 0).translate(0, 0.3, 0),
+      new THREE.IcosahedronGeometry(0.26, 0).translate(0.25, 0.25, 0.12),
+      new THREE.IcosahedronGeometry(0.22, 0).translate(-0.22, 0.28, -0.1),
+    ];
+    const bushGeo = mergeGeometries(bushGeoParts);
+    const bushCount = 260;
+    const bushIM = new THREE.InstancedMesh(bushGeo, bushMat, bushCount);
+    bushIM.castShadow = true;
+    bushIM.receiveShadow = false;
+    let bc = 0, at = 0;
+    while (bc < bushCount && at++ < 5000) {
+      const x = (rng() * 2 - 1) * (MAP_HALF - 8);
+      const z = (rng() * 2 - 1) * (MAP_HALF - 8);
+      if (nearPath(x, z, 1.6)) continue;
+      if (Math.hypot(x, z - 22) < 6) continue;
+      const streamZ = -18 + Math.sin(x * 0.08) * 3.5;
+      if (Math.abs(z - streamZ) < 2 && Math.abs(x) < 60) continue;
+      _pos.set(x, sampleHeight(x, z), z);
+      _rot.set(0, rng() * Math.PI * 2, 0);
+      _quat.setFromEuler(_rot);
+      const s = 0.7 + rng() * 0.9;
+      _scl.set(s, s * (0.85 + rng() * 0.4), s);
+      _mat4.compose(_pos, _quat, _scl);
+      bushIM.setMatrixAt(bc++, _mat4);
+    }
+    bushIM.count = bc;
+    bushIM.instanceMatrix.needsUpdate = true;
+    group.add(bushIM);
+  }
+
+  // ==== MUSHROOMS (small red-cap + white stem, in clusters) ====
+  {
+    const stemMat = new THREE.MeshStandardMaterial({ color: 0xf0e6d0, roughness: 0.85, flatShading: true });
+    const capMats = [
+      new THREE.MeshStandardMaterial({ color: 0xc94838, roughness: 0.6, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0xd8a068, roughness: 0.7, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0xe0d0a0, roughness: 0.7, flatShading: true }),
+    ];
+    const stemGeo = new THREE.CylinderGeometry(0.025, 0.03, 0.14, 6).translate(0, 0.07, 0);
+    const capGeo  = new THREE.SphereGeometry(0.08, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.6).translate(0, 0.16, 0);
+
+    const stemIM = new THREE.InstancedMesh(stemGeo, stemMat, 90);
+    stemIM.castShadow = true;
+    const capIMs = capMats.map((m) => new THREE.InstancedMesh(capGeo, m, 30));
+    capIMs.forEach((im) => { im.castShadow = true; });
+
+    let stemIdx = 0;
+    const capIdxs = [0, 0, 0];
+    for (let cluster = 0; cluster < 30 && stemIdx < 90; cluster++) {
+      const cx = (rng() * 2 - 1) * (MAP_HALF - 12);
+      const cz = (rng() * 2 - 1) * (MAP_HALF - 12);
+      if (nearPath(cx, cz, 1.4)) continue;
+      const n = 2 + Math.floor(rng() * 3);
+      for (let i = 0; i < n && stemIdx < 90; i++) {
+        const x = cx + (rng() - 0.5) * 1.2;
+        const z = cz + (rng() - 0.5) * 1.2;
+        const y = sampleHeight(x, z);
+        _pos.set(x, y, z);
+        _rot.set(0, rng() * Math.PI * 2, 0);
+        _quat.setFromEuler(_rot);
+        const s = 0.7 + rng() * 0.7;
+        _scl.set(s, s, s);
+        _mat4.compose(_pos, _quat, _scl);
+        stemIM.setMatrixAt(stemIdx++, _mat4);
+        const cvi = i % 3;
+        if (capIdxs[cvi] < 30) capIMs[cvi].setMatrixAt(capIdxs[cvi]++, _mat4);
+      }
+    }
+    stemIM.count = stemIdx; stemIM.instanceMatrix.needsUpdate = true;
+    capIMs.forEach((im, i) => { im.count = capIdxs[i]; im.instanceMatrix.needsUpdate = true; });
+    group.add(stemIM);
+    capIMs.forEach((im) => group.add(im));
+  }
+
+  // ==== EXTRA FALLEN LOGS scattered (moss-tinted brown cylinders on ground) ====
+  {
+    const logMat = new THREE.MeshStandardMaterial({ color: 0x53381f, roughness: 1.0, flatShading: true });
+    const mossMat = makeSwayMaterial(new THREE.Color(0x5c8a4d).multiply(mood.foliageTint), { swayAmount: 0.02, swayFreq: 1.0 });
+    swayMaterials.push(mossMat);
+    let placed = 0;
+    let logAttempts = 0;
+    while (placed < 8 && logAttempts++ < 400) {
+      const x = (rng() * 2 - 1) * (MAP_HALF - 20);
+      const z = (rng() * 2 - 1) * (MAP_HALF - 20);
+      if (nearPath(x, z, 2.5)) continue;
+      if (Math.hypot(x, z - 22) < 12) continue;
+      const streamZ = -18 + Math.sin(x * 0.08) * 3.5;
+      if (Math.abs(z - streamZ) < 3 && Math.abs(x) < 60) continue;
+      const len = 2.5 + rng() * 1.8;
+      const rad = 0.28 + rng() * 0.12;
+      const logGeo = new THREE.CylinderGeometry(rad, rad, len, 8);
+      const log = new THREE.Mesh(logGeo, logMat);
+      log.rotation.z = Math.PI / 2;
+      log.rotation.y = rng() * Math.PI;
+      const y = sampleHeight(x, z);
+      log.position.set(x, y + rad, z);
+      log.castShadow = true; log.receiveShadow = true;
+      group.add(log);
+      obstacles.push({ x, z, r: rad + 0.2 });
+      const moss = new THREE.Mesh(new THREE.IcosahedronGeometry(rad * 0.9, 0).scale(1.4, 0.35, 1.0), mossMat);
+      moss.position.set(x, y + rad + 0.1, z);
+      moss.rotation.y = log.rotation.y;
+      group.add(moss);
+      placed++;
+    }
+  }
+
 
   // ==== HERO PROPS ====
 

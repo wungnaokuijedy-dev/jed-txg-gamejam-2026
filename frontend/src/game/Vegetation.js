@@ -130,6 +130,7 @@ export function buildVegetation(mood) {
   group.name = 'vegetation';
   const obstacles = [];
   const swayMaterials = [];
+  const standingStones = [];
 
   const rng = mulberry32(1337);
 
@@ -548,6 +549,7 @@ export function buildVegetation(mood) {
       stone.rotation.z = (rng() - 0.5) * 0.06;
       stone.position.set(sx, sampleHeight(sx, sz) + h / 2 - 0.1, sz);
       group.add(stone);
+      standingStones.push(stone);
       obstacles.push({ x: sx, z: sz, r: 0.55 });
     }
     // Giant central tree in Ancient Grove
@@ -635,5 +637,5 @@ export function buildVegetation(mood) {
     group.add(fernIM);
   }
 
-  return { group, obstacles, swayMaterials };
+  return { group, obstacles, swayMaterials, standingStones };
 }

@@ -1,6 +1,60 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from '../../game/Game.js';
 
+// Organic Forest Health icon that morphs sprout → sapling → young tree.
+function HealthTierIcon({ tier }) {
+  // 0 = sprout (two small leaves + short stem)
+  // 1 = sapling (thin trunk + a few small leaf tufts)
+  // 2 = young tree (trunk + rounded canopy)
+  return (
+    <svg className="wnl-hud-tree-svg" width="42" height="52" viewBox="0 0 42 52" aria-label="Forest Health">
+      {/* Ground line */}
+      <ellipse cx="21" cy="49" rx="14" ry="2" fill="rgba(20,32,20,0.55)" />
+      {/* Stem/trunk grows with tier */}
+      <rect
+        x="19.5" y={tier === 0 ? 40 : tier === 1 ? 32 : 22}
+        width="3" height={tier === 0 ? 9 : tier === 1 ? 17 : 27}
+        rx="1.5"
+        fill="#6b4a2f"
+      />
+      {tier === 0 && (
+        <>
+          <path d="M14,40 Q12,36 18,36 Q20,40 14,40Z" fill="#8fc48f" />
+          <path d="M28,40 Q30,36 24,36 Q22,40 28,40Z" fill="#8fc48f" />
+          <path d="M18,36 Q21,32 24,36" fill="none" stroke="#8fc48f" strokeWidth="1.4" />
+        </>
+      )}
+      {tier === 1 && (
+        <>
+          <ellipse cx="21" cy="30" rx="7" ry="6" fill="#7bb37b" />
+          <ellipse cx="15" cy="34" rx="4" ry="3.5" fill="#6ea86e" />
+          <ellipse cx="27" cy="34" rx="4" ry="3.5" fill="#6ea86e" />
+          <ellipse cx="21" cy="24" rx="4" ry="3.5" fill="#8fc48f" />
+        </>
+      )}
+      {tier === 2 && (
+        <>
+          <ellipse cx="21" cy="18" rx="14" ry="12" fill="#5a9a5a" />
+          <ellipse cx="13" cy="24" rx="7" ry="6" fill="#6ea86e" />
+          <ellipse cx="30" cy="22" rx="7" ry="6" fill="#4a8a4a" />
+          <ellipse cx="21" cy="10" rx="7" ry="6" fill="#8fc48f" />
+          {/* Gentle glow */}
+          <ellipse cx="21" cy="18" rx="16" ry="14" fill="none" stroke="rgba(180,230,180,0.35)" strokeWidth="1.6" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function SeedIcon() {
+  return (
+    <svg width="16" height="20" viewBox="0 0 16 20" aria-hidden>
+      <ellipse cx="8" cy="12" rx="5" ry="7" fill="#f5d888" stroke="#8a6a2c" strokeWidth="1" />
+      <path d="M8,5 Q10,2 12,4" fill="none" stroke="#5a8a4a" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // Full-screen game shell. Handles:
 //   - loading screen with progress
 //   - click-to-play gate (also satisfies future audio autoplay policy)
@@ -24,6 +78,16 @@ export default function GameApp() {
   const [areaBanner, setAreaBanner] = useState('');
   const areaBannerTimerRef = useRef(null);
   const lastAreaRef = useRef('');
+
+  // Phase 2 HUD state
+  const [gameStateSnap, setGameStateSnap] = useState({
+    health: 50, healthTier: 1, seeds: 0, objective: '', prompt: '',
+  });
+  const [letterboxOn, setLetterboxOn] = useState(false);
+  const [seedFlashKey, setSeedFlashKey] = useState(0);
+  const [tierFlashKey, setTierFlashKey] = useState(0);
+  const prevSeedsRef = useRef(0);
+  const prevTierRef = useRef(1);
 
   // Boot game on mount
   useEffect(() => {
@@ -59,12 +123,24 @@ export default function GameApp() {
           areaBannerTimerRef.current = setTimeout(() => setAreaBanner(''), 3200);
         }
       },
+      onGameStateChange: (snap) => {
+        if (cancelled) return;
+        setGameStateSnap(snap);
+        if (snap.seeds > prevSeedsRef.current) setSeedFlashKey((k) => k + 1);
+        prevSeedsRef.current = snap.seeds;
+        if (snap.healthTier !== prevTierRef.current) setTierFlashKey((k) => k + 1);
+        prevTierRef.current = snap.healthTier;
+      },
+      onLetterbox: (on) => { if (!cancelled) setLetterboxOn(!!on); },
     });
     gameRef.current = game;
 
     game.load().then(() => {
       if (cancelled) return;
       game.start();
+      // Expose the game to window for dev tooling / integration tests. Harmless
+      // in production; useful in headless testing.
+      try { window.__wnl = game; } catch (_) {}
     }).catch((e) => {
       if (!cancelled) setErrorMsg(e && e.message ? e.message : 'Failed to load');
     });
@@ -118,6 +194,46 @@ export default function GameApp() {
           </div>
         </div>
       ) : null}
+
+      {/* ==== Phase 2 HUD ==== */}
+      {playing && loaded && !errorMsg && (
+        <>
+          {/* Forest Health tier icon (top-left) */}
+          <div className="wnl-hud-health" data-testid="health-hud">
+            <HealthTierIcon key={tierFlashKey} tier={gameStateSnap.healthTier} />
+          </div>
+
+          {/* Seeds counter (appears after first pickup) */}
+          {gameStateSnap.seeds > 0 && (
+            <div className="wnl-hud-seeds" data-testid="seeds-hud" key={seedFlashKey}>
+              <SeedIcon />
+              <span className="wnl-hud-seeds-num">{gameStateSnap.seeds}</span>
+            </div>
+          )}
+
+          {/* Objective whisper (top-center, italic) */}
+          {gameStateSnap.objective && (
+            <div className="wnl-hud-objective" data-testid="objective-hud" key={gameStateSnap.objective}>
+              {gameStateSnap.objective}
+            </div>
+          )}
+
+          {/* Interaction prompt (bottom-center) */}
+          {gameStateSnap.prompt && (
+            <div className="wnl-hud-prompt" data-testid="prompt-hud">
+              {gameStateSnap.prompt}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Letterbox bars during scripted moments */}
+      {letterboxOn && (
+        <>
+          <div className="wnl-letterbox wnl-letterbox-top" data-testid="letterbox-top" />
+          <div className="wnl-letterbox wnl-letterbox-bottom" data-testid="letterbox-bottom" />
+        </>
+      )}
 
       {/* Loading screen */}
       {showLoadingScreen && (

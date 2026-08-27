@@ -610,9 +610,21 @@ export class Character {
     this.grounded = true;
     this.velocity = new THREE.Vector3();
 
+    // Pose override — Interactables can request a kneel/reach pose.
+    this._poseName = null;      // 'kneel' | null
+    this._poseT = 0;
+
     // Precompute local right/forward for ponytail forces
     this._facingRunSpeed = 6.5;   // used for speed normalization heuristics
   }
+
+  // Begin a static pose that overrides walk/idle animation. Currently 'kneel'.
+  beginPose(name) {
+    this._poseName = name;
+    this._poseT = 0;
+  }
+  endPose() { this._poseName = null; }
+  isInPose() { return !!this._poseName; }
 
   // dt = seconds
   // speedNormalized = horizSpeed / runSpeed
@@ -698,6 +710,32 @@ export class Character {
     // ---- Head — tuck slightly in air, gentle idle look ----
     this.headPivot.rotation.x = -0.05 + this.airBlend * 0.22 + Math.sin(t * 1.4) * 0.02 * (1 - this.moveBlend);
     this.headPivot.rotation.z = idleSway * 0.15 * (1 - this.moveBlend) + this.leanZ * -0.35;
+
+    // ---- Pose override (kneel/reach for interactions) ----
+    if (this._poseName === 'kneel') {
+      this._poseT = Math.min(1, this._poseT + dt * 3.0);   // ~0.33s to fully kneel
+      const k = this._poseT;
+      // Right leg kneels: hip more forward, knee more bent
+      this.hipR.rotation.x = -0.9 * k;
+      this.kneeR.rotation.x = 1.6 * k;
+      // Left leg supports (slight bend)
+      this.hipL.rotation.x = 0.15 * k;
+      this.kneeL.rotation.x = 0.75 * k;
+      // Body squats down + leans forward
+      this.body.position.y = 0.95 - 0.35 * k;
+      this.body.rotation.x = 0.25 * k;
+      // Arms reach forward
+      this.shoulderR.rotation.x = -1.1 * k;
+      this.shoulderL.rotation.x = -0.7 * k;
+      this.elbowR.rotation.x = 0.9 * k;
+      this.elbowL.rotation.x = 0.6 * k;
+      // Head slightly down
+      this.headPivot.rotation.x = -0.05 + 0.25 * k;
+    } else if (this._poseT > 0) {
+      // Ease out
+      this._poseT = Math.max(0, this._poseT - dt * 3.0);
+      // The next updateAnimation call will overwrite these — fine.
+    }
 
     // ---- Ponytail secondary motion ----
     this._updatePonytail(dt, t, yawRate);

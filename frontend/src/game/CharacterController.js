@@ -40,9 +40,29 @@ export class CharacterController {
     p.y = sampleHeight(p.x, p.z);
   }
 
+  _groundY(x, z) { return sampleHeight(x, z); }
+
   update(dt) {
     const c = this.character;
     const cam = this.camera;
+
+    // While the character is in a locked pose (kneel/interact), freeze inputs.
+    if (c.isInPose && c.isInPose()) {
+      c.velocity.x = 0;
+      c.velocity.z = 0;
+      // Still apply gravity & terrain grounding
+      const p = c.root.position;
+      const groundY = require && false ? 0 : this._groundY(p.x, p.z);
+      c.velocity.y = 0;
+      p.y = groundY;
+      // Facing override if requested by interactables
+      if (c._pendingFaceOverride !== null && c._pendingFaceOverride !== undefined) {
+        c.updateAnimation(dt, 0, true, c._pendingFaceOverride);
+      } else {
+        c.updateAnimation(dt, 0, true, null);
+      }
+      return;
+    }
 
     // Camera forward/right on horizontal plane
     cam.getWorldDirection(_fwd);

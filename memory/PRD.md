@@ -45,9 +45,18 @@ Jam judge / player on a desktop Chrome browser. No authentication. No accounts.
 - **WebGL context-loss handling**, resize handling, disposal on unmount.
 
 ## Prioritized backlog (deferred to later phases)
-- P0 next: audio (ambient forest bed, footsteps, wind), vine-cutting puzzle for Area 2, water-restoration puzzle for Area 3, standing-stones activation puzzle for Area 4, "Heart of the Forest" gate + finale for Area 5.
-- P1: wildlife AI (birds, deer), Forest Health mechanic driving mood-lerp (MOODS.DAWN_COOL → MOODS.WARM_HEALED as puzzles solve), inventory / interaction indicator, menu / pause / options, localStorage save.
-- P2: subtle god-ray shafts near Entrance, footprint decals, dynamic time-of-day, first-person toggle fallback (implemented ability retained as a stability escape hatch), photo-mode.
+### Phase 3 (next)
+- Ending band selection (drives ending picked at Heart choice: cool / balanced / warm-healed based on `_moodT` at the final choice).
+- Player choice at the Heart (place seed vs. take the flower vs. sit) → three endings.
+- Save / restore via localStorage keyed off `GameState` (all state already lives in one object).
+- Cinematic sequences: full camera moves + slower letterbox + dialog whispers over the three endings.
+- Optional plants gate two hidden micro-scenes (extra bloom vistas).
+
+### Phase 4
+- Audio (ambient forest bed, footsteps, wind, per-puzzle stingers).
+- Menu / pause / options (sensitivity, brightness).
+- Photo mode (F2) + shareable snapshot with area names visited.
+- Localization pass, credits, license notice.
 
 ## Files touched in phase 1
 - `/app/frontend/src/App.js`, `App.css`, `index.css` — game shell + overlays styling.
@@ -61,5 +70,21 @@ Jam judge / player on a desktop Chrome browser. No authentication. No accounts.
 - `/app/frontend/src/game/CameraController.js` — orbit camera + de-clip.
 - `/app/frontend/src/game/Input.js`, `Mood.js`, `Rng.js` — supporting modules.
 
-## Third-person status
-Kept — did not need the first-person fallback. Camera de-clip and analytic ground follow produce a stable, non-jittery character.
+## Phase 2 additions (Feb 2026)
+- **`GameState.js`** central object: `health` (0..100, start 50), `seeds`, `puzzleFlags {grow_done, restore_done, bird_freed, stones_awoken, heart_reached}`, `doneInteractions` set, `objective` text, event bus (`health`, `seeds`, `objective`, `prompt`, `mood`, `letterbox`, `flag`). Health drives a smoothed mood-lerp `t = clamp((health-40)/50, 0, 1)` that updates fog / hemisphere / sun / sky uniforms in real time via `Game.applyMood`.
+- **`Interactables.js`**: proximity + facing prompt system (closest item in front of the character wins). Triggers a kneel/reach pose on the character for ~1s while running `onInteract` and gently pulls the camera in.
+- **Kneel/reach pose** added to `Character.updateAnimation` with a smooth blend, driven by `beginPose('kneel')` / `endPose()`. `CharacterController` freezes horizontal velocity while `isInPose()` is true.
+- **`Puzzles.js`** orchestrator wires:
+  - **3 seeds** (glinting orbs with hovering butterfly clusters as FOLLOW hints).
+  - **3 withered plants** — the required one at the fallen log grows an animated **vine bridge** (~4s of scaling-in curved cylinders + leaves + fading root-glow burst) that shrinks the log's collision so the player can pass. Two optional plants give +5 each.
+  - **Spring debris pile** at the upstream end of the stream (Area 3); `E — Clear the spring` crumbles it and starts the **animated stream water** shader (flow noise + foam near edges); root bridge downstream lifts smoothly on activation.
+  - **Tangled bird** — `E — Free the bird`; wings and vines detach, bird flies toward the Ancient Grove.
+  - **Standing stones** (Area 4): after Restore, `E — Touch the stones` starts a sequenced emissive-glow ripple across the 6 stones and appoints a guide — **deer** at health ≥ 60, otherwise a **firefly trail** placed segment-by-segment along the guide route.
+  - **Heart gate**: two great roots that auto-part on player arrival with `stones_awoken` set, with a **letterbox** effect (~3.5s).
+  - **Fawn** placed near the ancient tree in the Heart clearing.
+  - **Temptation set**: glowing-flower cluster + mushroom ring, both wither on interact (-10 each). Critical path is **never** gated by health.
+- **`Wildlife.js`**: 3 ambient deer with a wander/alert/flee state machine + speed-driven leg swings. `Sprinting into deer` triggers flee + `-2` health (capped by cooldown). Guide-deer mode moves along a spline route only when the player is nearby, animating legs. **Butterfly clusters** (point sprites in a lobe shape) hover near each seed as the "look here" hint. **Firefly trail** appears segment-by-segment.
+- **HUD** (React overlays): organic health tier icon (`sprout` / `sapling` / `young tree` SVG that morphs with a pop-and-glow keyframe on tier change); seeds counter (appears only after first pickup with a pop-in animation); italic objective whisper top-center (fades on change); "E — <verb>" interaction prompt bottom-center; letterbox bars on scripted moments. All non-intrusive.
+- **F4 debug hotkey** (dev only) dumps GameState to console.
+- **`window.__wnl` exposed** so integration tests can inspect/teleport without affecting production. Not surfaced in UI.
+

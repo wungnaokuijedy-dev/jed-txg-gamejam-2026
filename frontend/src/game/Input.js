@@ -6,6 +6,10 @@ export class Input {
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.pointerLocked = false;
+    // E key edge-detection
+    this._interactPressed = false;
+    // F4 debug dump edge-detection
+    this._dumpPressed = false;
     // Drop the very first mousemove event after acquiring pointer lock — the browser
     // often delivers a large synthetic movement delta on lock acquisition which would
     // otherwise snap the camera unexpectedly.
@@ -14,7 +18,10 @@ export class Input {
     this._onKeyDown = (e) => {
       // Allow browser shortcuts with modifiers to pass through.
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const wasNew = !this.keys.has(e.code);
       this.keys.add(e.code);
+      if (wasNew && e.code === 'KeyE') this._interactPressed = true;
+      if (wasNew && e.code === 'F4')  this._dumpPressed = true;
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight'].includes(e.code)) {
         e.preventDefault();
       }
@@ -60,6 +67,18 @@ export class Input {
   isMoveRight() { return this.isDown('KeyD') || this.isDown('ArrowRight'); }
   isSprint() { return this.isDown('ShiftLeft') || this.isDown('ShiftRight'); }
   isJump() { return this.isDown('Space'); }
+
+  // Edge-detect E key press (returns true once per keydown).
+  consumeInteractPress() {
+    const p = this._interactPressed;
+    this._interactPressed = false;
+    return p;
+  }
+  consumeDumpPress() {
+    const p = this._dumpPressed;
+    this._dumpPressed = false;
+    return p;
+  }
 
   // Call once per frame; returns and clears mouse delta.
   consumeMouseDelta() {

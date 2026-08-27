@@ -10,6 +10,10 @@ import { buildTerrainMesh, sampleHeight, AREAS, currentAreaName } from './Terrai
 import { buildVegetation } from './Vegetation.js';
 import { buildSky, buildDistantMountains, buildMist, buildLeaves, buildFireflies, buildPollen, buildGodRays, buildBirds, updateBirds } from './Atmosphere.js';
 import { MOODS } from './Mood.js';
+import { GameState } from './GameState.js';
+import { Interactables } from './Interactables.js';
+import { Wildlife } from './Wildlife.js';
+import { Puzzles } from './Puzzles.js';
 
 export class Game {
   constructor(container, callbacks = {}) {
@@ -108,6 +112,7 @@ export class Game {
     this.vegetation = veg.group;
     this.obstacles = veg.obstacles;
     this.swayMaterials = veg.swayMaterials;
+    this._standingStones = veg.standingStones || [];
     this.scene.add(this.vegetation);
 
     this._reportProgress(0.78, 'Weaving the mist');
@@ -137,6 +142,35 @@ export class Game {
 
     this.charCtrl = new CharacterController(this.character, this.input, this.camera, this.obstacles);
     this.camCtrl = new CameraController(this.camera, this.character, this.input);
+
+    // ==== Phase 2 systems ====
+    this.gameState = new GameState(this);
+    this.interactables = new Interactables(this);
+    this.wildlife = new Wildlife(this);
+    this.scene.add(this.wildlife.group);
+    this.wildlife.addAmbientDeer();
+    this.puzzles = new Puzzles(this);
+    this.puzzles.setup(this._standingStones);
+
+    // Notify GameApp when things change
+    if (this.callbacks.onGameStateChange) {
+      const emit = () => this.callbacks.onGameStateChange({
+        health: this.gameState.health,
+        healthTier: this.gameState.healthTier(),
+        seeds: this.gameState.seeds,
+        objective: this.gameState.objective,
+        prompt: this.gameState.activePromptText,
+      });
+      this.gameState.on('health', emit);
+      this.gameState.on('seeds', emit);
+      this.gameState.on('objective', emit);
+      this.gameState.on('prompt', emit);
+      this.gameState.on('letterbox', ({ on }) => {
+        if (this.callbacks.onLetterbox) this.callbacks.onLetterbox(on);
+      });
+      // Push initial state
+      emit();
+    }
 
     this._reportProgress(1.0, 'Ready');
     if (this.callbacks.onLoaded) this.callbacks.onLoaded();
@@ -180,6 +214,33 @@ export class Game {
     this.heartLight = heart;
   }
 
+  // Called each frame by GameState with the lerped mood values.
+  applyMood(cur) {
+    if (!cur) return;
+    // Fog
+    if (this.scene.fog) {
+      this.scene.fog.color.copy(cur.fogColor);
+      this.scene.fog.density = cur.fogDensity;
+    }
+    // Lights
+    if (this.hemi) {
+      this.hemi.color.copy(cur.hemiSky);
+      this.hemi.groundColor.copy(cur.hemiGround);
+      this.hemi.intensity = cur.hemiIntensity;
+    }
+    if (this.sun) {
+      this.sun.color.copy(cur.sunColor);
+      this.sun.intensity = cur.sunIntensity;
+    }
+    // Sky uniforms
+    if (this.sky && this.sky.material && this.sky.material.uniforms) {
+      const u = this.sky.material.uniforms;
+      if (u.uTop) u.uTop.value.copy(cur.skyTop);
+      if (u.uHorizon) u.uHorizon.value.copy(cur.skyHorizon);
+      if (u.uGround) u.uGround.value.copy(cur.skyGround);
+    }
+  }
+
   start() {
     if (this._started) return;
     this._started = true;
@@ -220,6 +281,15 @@ export class Game {
     // Input is naturally zero without lock (movement possible without lock too — that's fine).
     if (this.charCtrl) this.charCtrl.update(dt);
     if (this.camCtrl) this.camCtrl.update(dt);
+
+    // Phase 2 updates
+    if (this.gameState) this.gameState.update(dt);
+    if (this.interactables) this.interactables.update(dt);
+    if (this.wildlife) this.wildlife.update(dt, this.character.root.position, this.character.velocity);
+    if (this.puzzles) this.puzzles.update(dt, now);
+
+    // Debug hotkey F4
+    if (this.input && this.input.consumeDumpPress() && this.gameState) this.gameState.dumpDebug();
 
     // Sway uniforms
     if (this.swayMaterials) {

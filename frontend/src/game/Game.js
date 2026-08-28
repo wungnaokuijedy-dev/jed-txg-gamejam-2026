@@ -50,8 +50,16 @@ export class Game {
         stencil: false,
       });
     } catch (e) {
-      if (this.callbacks.onError) this.callbacks.onError(e);
-      throw e;
+      // WebGL unavailable (headless env, blocked GPU, ancient browser…). Notify
+      // the shell so its friendly "Something went wrong — Reload" overlay
+      // renders. Do NOT re-throw — that stalls the loading bar with an uncaught
+      // exception and the overlay never shows. Constructor exits cleanly here;
+      // `load()` and `start()` are guarded to no-op below.
+      this._initFailed = true;
+      if (this.callbacks.onError) {
+        try { this.callbacks.onError(e); } catch (_) { /* shell must not break init */ }
+      }
+      return;
     }
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -93,6 +101,10 @@ export class Game {
   }
 
   async load() {
+    // If init failed (WebGL unavailable), no world to build — the shell has
+    // already been shown the error via onError; leave loading pending here so
+    // it resolves without touching the missing renderer.
+    if (this._initFailed) return;
     // We yield to the main thread between steps so the loading UI can render.
     const yieldToUI = () => new Promise((r) => setTimeout(r, 0));
 
@@ -328,6 +340,7 @@ export class Game {
   }
 
   start() {
+    if (this._initFailed) return;
     if (this._started) return;
     this._started = true;
     this._lastT = performance.now();

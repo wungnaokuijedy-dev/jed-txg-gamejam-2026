@@ -20,6 +20,7 @@ import { Endings } from './Endings.js';
 import { save as saveGame, load as loadGame, apply as applySave, clearSave, hasSave, recordEndingSeen, endingsSeen } from './Save.js';
 import { AudioEngine } from './AudioEngine.js';
 import { SettingsStore } from './Settings.js';
+import { Tutorial } from './Tutorial.js';
 
 export class Game {
   constructor(container, callbacks = {}) {
@@ -180,6 +181,10 @@ export class Game {
     // deferred until GameApp calls game.initAudio() from a click handler.
     this.settings = new SettingsStore(this);
 
+    // Tutorial (Phase 6b): action-driven hints for new runs only.
+    this.tutorial = new Tutorial(this);
+    this._mapOpenedSinceTutorial = false;
+
     this.puzzles = new Puzzles(this);
     this.puzzles.setup(this._standingStones);
 
@@ -256,6 +261,12 @@ export class Game {
       });
       this.gameState.on('silence_mood', ({ on }) => {
         if (this.callbacks.onSilenceMood) this.callbacks.onSilenceMood(!!on);
+      });
+      this.gameState.on('tutorial_hint', (payload) => {
+        if (this.callbacks.onTutorialHint) this.callbacks.onTutorialHint(payload);
+      });
+      this.gameState.on('minimap_pulse', () => {
+        if (this.callbacks.onMinimapPulse) this.callbacks.onMinimapPulse();
       });
       // Autosave on major story beats
       this.gameState.on('flag', () => this.saveNow());
@@ -395,6 +406,9 @@ export class Game {
     if (this._paused) return;
     this._paused = true;
     if (this.audio) this.audio.suspend();
+    // Tutorial defers itself while paused. The main loop's paused-branch
+    // early-returns before Tutorial.update runs, so drive the deferral here.
+    if (this.tutorial) this.tutorial.setDeferred(true);
     if (this.callbacks.onPauseChange) this.callbacks.onPauseChange(true);
   }
   resume() {
@@ -402,6 +416,7 @@ export class Game {
     this._paused = false;
     this._lastT = performance.now();   // avoid dt spike
     if (this.audio) this.audio.resume();
+    if (this.tutorial) this.tutorial.setDeferred(false);
     if (this.callbacks.onPauseChange) this.callbacks.onPauseChange(false);
   }
   isPaused() { return this._paused; }
@@ -479,7 +494,16 @@ export class Game {
     if (!this.cinematic) return;
     if (this._openingPlayed) return;
     this._openingPlayed = true;
-    this.cinematic.play(Cinematic.opening(this));
+    const cfg = Cinematic.opening(this);
+    const origEnd = cfg.onEnd;
+    cfg.onEnd = () => {
+      if (origEnd) try { origEnd(); } catch (_) {}
+      // Kick off the interactive tutorial (only for New Game runs — Continue
+      // skips it because the save already carries `tutorial_done: true` for
+      // any prior playthrough).
+      if (this.tutorial) this.tutorial.start();
+    };
+    this.cinematic.play(cfg);
   }
 
   hasSave() { return hasSave(); }
@@ -490,6 +514,9 @@ export class Game {
     if (!data) return false;
     const ok = applySave(data, this.gameState, this.character, this.weather);
     if (ok && this.puzzles) this.puzzles.applySavedState();
+    // Continue skips the opening cinematic (and therefore Tutorial.start()),
+    // so sync the tutorial's internal _done from the loaded puzzleFlags.
+    if (ok && this.tutorial) this.tutorial.syncFromSave();
     return ok;
   }
 
@@ -686,6 +713,7 @@ export class Game {
     if (this.interactables && !cineActive && !this._menuMode) this.interactables.update(dt);
     if (this.wildlife) this.wildlife.update(dt, this.character.root.position, this.character.velocity);
     if (this.puzzles) this.puzzles.update(dt, now);
+    if (this.tutorial) this.tutorial.update(dt);
 
     // Area change → visit + ambience crossfade
     if (!this._menuMode && this.character) {

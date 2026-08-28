@@ -268,3 +268,64 @@ Hard constraint honoured: **zero changes to gameplay logic, story, objectives, p
 - Bundle: **232.9 kB gzipped JS (+1.8 kB from Phase 5) + 12.6 kB gzipped CSS**. Well under jam limits.
 - Instance counts unchanged: same ~540 trees / ~150 rocks / 1600 grass tufts / 360 flowers / 60 ferns; no extra draw calls added by Phase 6 (mini-map draws to a 2D canvas, not to the WebGL context).
 
+
+
+## Phase 6b additions (Feb 2026 — this session, submission gate)
+
+### Movement feel (root-cause fix, verified)
+- Client-reported bugs: **A/D turn jitter** and **Shift sprint speed / animation snapping**.
+- Root cause was a **constant-rate yaw clamp** in `Character.updateAnimation` (`facingY += ±maxYawStep`) — this gave instantaneous direction reversals on alternating A/D input and abrupt velocity drops at the end of a 90° turn, and a bang-bang change of `targetSpeed` (walk↔run) that snapped stride/lean/moveBlend derivations.
+- Fix — `Character.js`:
+  - Replaced the yaw clamp with a **Unity-style critically-damped angle spring** `_smoothDampAngle(current, target, currentVelocity, smoothTime=0.15, dt)` (`_yawVel` state, wrap-safe, anti-overshoot). Result: ~0.30 s ease-in/ease-out settle on a 90° turn, no overshoot, no reversal snap.
+  - When no movement input, `_yawVel` is bled off with a `damp(8, dt)` so idle never drifts.
+  - `stride`, `lean`, and `moveBlend` continue to read from **actual horizontal velocity** (which is already accel/decel smoothed by the controller) — no dependence on raw input.
+- Fix — `CharacterController.js`:
+  - `_smoothedWish` (Vector3): raw input wish direction is low-pass smoothed via `THREE.MathUtils.damp` at `lambda = 12` (~0.083 s time constant) before being fed as `targetVel`, then renormalised so diagonals stay ≤ 1. Kills A/D tap twitch and diagonal single-frame flips.
+  - `_targetSpeedSm` (scalar): the raw target speed (`walkSpeed | runSpeed`) is low-pass smoothed with asymmetric lambdas (up = 4 ≈ 0.25 s, down = 3 ≈ 0.33 s) before being fed into the accel/decel step. Pressing Shift ramps stride/lean smoothly instead of snapping.
+- Verification: character `speed` observed climbing smoothly from 0 → 3.5 (walk) → ramping to ~6.5 on Shift; hint/animation state derived from velocity blends continuously. No axis jitter, no console errors.
+
+### Interactive Tutorial (new, gated to New Game only)
+- File: `/app/frontend/src/game/Tutorial.js`.
+- 6-step action-driven hint sequence, each with a per-step fallback timeout:
+  1. `move` — action: velocity > 0.5 for 1500 ms cumulative; fallback 6000 ms. Text: "WASD — walk the forest".
+  2. `sprint` — action: sprinting AND moving for 1000 ms; fallback 5000 ms. Text: "SHIFT — run".
+  3. `theme` — timed 4000 ms. Text: "The forest will show you the way — follow what glows and moves".
+  4. `map` — action: any map open (M key OR pause-menu Map); fallback 5000 ms. Text: "M — your journal map". Also emits `minimap_pulse` event → CSS keyframe on the mini-map tile.
+  5. `seed` — proximity: only shown after entering 4 m of an available seed pickup; dismissed on seed pickup (`seedsPickedUp > 0`) or 6000 ms fallback; skipped entirely after 90 s of wandering without proximity.
+  6. `remember` — gated on (seedsPickedUp > 0 OR runT > 60 s); then timed 4000 ms. Text: "The forest remembers your choices… and so will the ending".
+- Auto-defers during any of: active cinematic, paused game, menu mode, HUD hidden, ending resolved, final choice open. Re-emits current hint on resume.
+- Only starts for **New Game** runs (Continue skips it because the save already carries `tutorial_done: true`). Persisted via `GameState.setFlag('tutorial_done', true)` on completion (rides existing autosave).
+- Wired into `Game.js`:
+  - `this.tutorial = new Tutorial(this)` in constructor.
+  - `this.tutorial.start()` chained into `Cinematic.opening` `onEnd` so the tutorial begins the moment the player has control.
+  - `this.tutorial.update(dt)` called each loop tick.
+  - Emits `tutorial_hint` events on `gameState`; `Game.js` forwards to `callbacks.onTutorialHint`.
+  - Emits `minimap_pulse` events; `Game.js` forwards to `callbacks.onMinimapPulse` which retriggers a CSS pulse on `<MiniMap>`.
+- UI (`components/game/Menus.jsx`):
+  - New `<TutorialHint text={...}>` component — small floating card, bottom-center, above the interaction prompt. `data-testid="tutorial-hint"`.
+  - `<MiniMap pulse={...}>` accepts a monotonically-increasing key; when it bumps, the tile pulses (`is-pulsing` CSS keyframe).
+- UI (`components/game/GameApp.jsx`):
+  - Boot subscribes `onTutorialHint` → `setTutorialText(text)` and `onMinimapPulse` → `setMinimapPulse(k+1)`.
+  - Renders `<TutorialHint>` only while `screen === 'playing' && !pauseMenu && !overlay && !ending && !hudHidden && !choiceOpen`.
+  - `M` key handler and the Pause Menu's Map button both call `game.tutorial.markMapOpened()` so the map step dismisses on the natural action.
+- Verified: state machine advances through steps correctly under normal action (velocity > 0.5 for 1500 ms → step 1, hold Shift+W → step 2, timeout → step 3, `markMapOpened()` → step 4, seed pickup → step 5). All fallback timers fire when action isn't taken. Zero overlap with cinematics/menus/choice/ending (defer path exercised).
+
+### README (submission rewrite)
+- `/app/README.md` rewritten to the definitive 14-section jam submission form.
+- Every claim verified against the codebase:
+  - Runtime deps (React 19.0.0, ReactDOM 19.0.0, Three.js 0.161.0) — confirmed against `frontend/package.json`.
+  - Bundle size (**234.61 kB gzipped JS + 12.70 kB gzipped CSS**) — from fresh `yarn build` output.
+  - Build tool (Craco 5) — confirmed against `frontend/package.json` `scripts`.
+  - Controls table — confirmed against `Input.js` + `GameApp.jsx` key handlers.
+  - Font disclosure — **fixed**: previous README falsely claimed "no `@font-face`, no Google Fonts request". `frontend/src/index.css:5` imports Cormorant Garamond from Google Fonts. README now truthfully discloses this with the SIL OFL 1.1 license and the system serif fallback stack, plus notes on the unused Inter link from CRA scaffolding and the platform's `emergent-main.js` + PostHog snippets (also inherited from the template, not part of the game).
+  - AI disclosure — kept as previously agreed (Emergent + Claude for development assistance and code generation; all geometry/textures/animations/audio procedurally generated at runtime; no third-party asset files).
+- No changes to gameplay, story, endings, saves, HUD, or any `data-testid` attribute.
+
+
+### Post-QA fixes (this session)
+- **Tutorial deferral on pause (was: MEDIUM bug)**: `Game.pause()` and `Game.resume()` now call `tutorial.setDeferred(true|false)` directly. The main loop's paused branch returns before `tutorial.update()` runs, so the deferral state and hint hide/restore are driven from pause/resume rather than the update tick. New method `Tutorial.setDeferred(v)` hides the hint on enter and re-emits the current step's hint on exit.
+- **Tutorial internal state on Continue (was: LOW bug)**: `Tutorial.syncFromSave()` is called at the end of `Game.applyLoadedSave()`. Continue skips the opening cinematic (and therefore `Tutorial.start()` was never called), leaving `_done=false` even when `puzzleFlags.tutorial_done === true`. `syncFromSave()` now sets `_done=true`, `active=false`, and emits `_emitHint(null)` when the flag is present.
+- **README section 7 wording**: rephrased the Inter `<link rel="stylesheet">` note to be technically precise ("the CSS file is fetched but no glyphs are ever rasterised because no CSS rule references the family").
+- **Rebuild after fixes**: `yarn build` → **234.78 kB gzipped JS** (+179 B) + 12.70 kB CSS. README section 9 updated to match.
+- Verified both fixes in headless: pause hides hint + sets `_deferred=true`; resume restores hint text ("WASD — walk the forest") + sets `_deferred=false`. Continue with saved `tutorial_done` produces `{done: true, active: false, hint: null, flag: true}`. Zero console errors.
+

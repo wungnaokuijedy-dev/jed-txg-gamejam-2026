@@ -1,0 +1,77 @@
+{
+  "summary": "Submission-gate QA for Where Nature Leads (Phase 6b). Verified: movement regression fix (no console errors, sprint reaches 6.42 m/s vs 6.5 target), the new Interactive Tutorial state machine (all 6 steps advance correctly, tutorial_done flag persists), Continue-skips-tutorial (no hint renders), Guardian ending logic (endingKind='guardian' at health 90+share=95), Settings persistence across reload, README numeric accuracy (build 234.61 kB JS + 12.70 kB CSS matches exactly; React/ReactDOM 19.0.0; Three.js 0.161.0; Google Fonts @import present in index.css), and Credits screen does NOT expose 'Emergent'/'Claude' strings while retaining 'TXG Nagaland Game Jam 2026'. Two minor deviations vs review spec found in the tutorial deferral & Continue paths (see frontend_issues). Ending card DOM did not render in headless due to forced cinematic._t fast-forward — the underlying choice/ending state is correct.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Tutorial deferral on pause()",
+        "issue": "When window.__wnl.pause() is called programmatically, tutorial._deferred stays False and the tutorial-hint DOM element remains visible. Root cause: Game._loop (Game.js:622-626) returns early when _paused=true, BEFORE reaching tutorial.update(dt) at line 709 — so Tutorial._shouldDefer() never runs to set _deferred=true. In real gameplay the Pause Menu overlay likely masks the hint visually, but the review requirement is strict: '_deferred should become true and the hint DOM element should disappear'. Fix: either call tutorial.update() before the paused early-return, or directly toggle deferred state in Game.pause()/resume().",
+        "selector": "[data-testid='tutorial-hint']",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "Tutorial state on Continue",
+        "issue": "After Continue with tutorial_done flag saved, window.__wnl.tutorial._done reads False (spec says True). Behavior IS user-visible-correct — tutorial.active=false, no hint renders — because Tutorial.start() is only chained onto the opening cinematic onEnd (Game.js:497-500), and Continue skips that cinematic so start() (which is where _done is set from the flag) never runs. Fix: also read the flag into tutorial._done in the Continue-load path so the internal state matches the spec.",
+        "selector": "window.__wnl.tutorial._done",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Ending card render via test-hook path",
+        "issue": "startFinalChoiceSequence() + click choice-share-btn + cinematic._t=60 correctly sets gameState.endingKind='guardian' and health=95, but the [data-testid='ending-card'] DOM element never mounts in the same test run. Forcing cinematic._t forward too fast likely skips the emit that mounts the card in GameApp.jsx. Not a gameplay bug — in a real un-forced play-through the card renders normally (verified in iteration 3). Recommend a direct hook like window.__wnl.showEndingCard(kind) for headless QA.",
+        "affected_selectors": ["[data-testid='ending-card']", "[data-testid='ending-kind-guardian']", "[data-testid='endings-row']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "readme_accuracy_checks": {
+    "section_5_dependency_versions": "PASS — React ^19.0.0, ReactDOM ^19.0.0, Three 0.161.0 exact match in package.json",
+    "section_9_build_size": "PASS — yarn build reports 234.61 kB JS + 12.7 kB CSS, exact match",
+    "section_7_google_fonts_import": "PASS — frontend/src/index.css:5 contains @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:...')",
+    "section_7_unused_inter_link": "PARTIAL — README says 'no CSS rule references it, so the browser drops the request', but frontend/public/index.html:10 uses <link rel=\"stylesheet\">, which DOES fetch the CSS regardless of whether any rule consumes the font. The claim is factually loose but does not affect gameplay.",
+    "section_13_credits_no_ai_disclosure": "PASS — credits-screen textContent contains no 'Emergent' or 'Claude' strings; 'TXG Nagaland Game Jam 2026' present.",
+    "section_3_controls_vs_Input.js": "SPOT-CHECK PASS — WASD/Arrows/Shift/Space/E/M/Esc/1-2-3/F3 are all referenced in Input.js and match README section 3."
+  },
+  "measured_results": {
+    "movement": {"peak_sprint_speed_m_s": 6.42, "target": 6.5, "console_errors_during_10s_run": 0, "verdict": "PASS"},
+    "tutorial_full_sequence": {
+      "step_0_move_advanced": true,
+      "step_1_sprint_advanced": true,
+      "step_2_theme_timed_advanced": true,
+      "step_3_map_via_markMapOpened": true,
+      "step_4_seed_via_addSeed": true,
+      "step_5_remember_timed_out": true,
+      "done_flag_true": true,
+      "puzzleFlags_tutorial_done": true,
+      "verdict": "PASS"
+    },
+    "tutorial_deferral_on_pause": {"deferred_after_pause": false, "hint_hidden_after_pause": false, "verdict": "FAIL vs spec (see ui_bugs #1)"},
+    "continue_skips_tutorial": {"active": false, "hint_rendered": false, "done_flag_matches_spec": false, "verdict": "Behaviorally PASS, internal state mismatch (see ui_bugs #2)"},
+    "ending_flow_guardian": {"endingKind": "guardian", "health": 95, "share_modifier_applied": true, "ending_card_rendered": false, "verdict": "Choice+health logic PASS; card DOM did not render under forced timings"},
+    "settings_persistence_after_reload": {"masterVol": 0.2, "invertY": true, "quality": "low", "localStorage_json_valid": true, "verdict": "PASS"},
+    "credits_ai_leak_check": {"has_Emergent": false, "has_Claude": false, "has_jam": true, "verdict": "PASS"},
+    "console_errors_total": 0
+  },
+  "test_report_links": [],
+  "action_items": [
+    "MEDIUM: Fix tutorial deferral so window.__wnl.pause() causes tutorial._deferred=true and hides the hint DOM. Either move tutorial.update() above the paused early-return in Game._loop, or directly toggle deferred + emit hint(null) from Game.pause()/resume().",
+    "LOW: When a save carries puzzleFlags.tutorial_done=true and the player uses Continue, also set window.__wnl.tutorial._done=true so the internal state matches the review spec (visible behavior is already correct — no hint renders).",
+    "LOW (README): Section 7's claim 'no CSS rule references it, so the browser drops the request' about the Inter font in public/index.html is factually loose — <link rel=stylesheet> always fetches. Rewrite as e.g. 'the file is fetched but no glyphs are ever rasterised because no CSS rule references the family' or remove the Inter <link> outright for offline distribution.",
+    "OPTIONAL: Add a direct QA hook window.__wnl.showEndingCard(kind) or similar so headless tests can exercise the ending-card DOM without racing the cinematic timeline."
+  ],
+  "critical_code_review_comments": [
+    "Game.js:622-626 vs 709: tutorial.update(dt) is unreachable while _paused=true. If deferral is meant to work on pause, either the update call must run before the pause return, or Game.pause() must directly notify the tutorial. The current Tutorial._shouldDefer() code path is dead code for the _paused branch.",
+    "Tutorial.start() (Tutorial.js:80-95) is the only place _done is initialised from the persisted flag. Because start() is only chained onto opening_cinematic.onEnd (Game.js:497-500), a Continue flow that skips the opening cinematic leaves _done=false even if the flag is true. Consider hoisting the flag-read to a constructor pass, or calling start() on both New Game and Continue paths (start() has an idempotent 'already done' short-circuit).",
+    "Tutorial.js:99 emits 'tutorial_hint' event. If _emitHint(null) is used to clear the hint, gameState listeners should be robust to a null payload — verified by reading Game.js:265-270 forwarding — LGTM.",
+    "CharacterController smoothing + Character yaw spring behave correctly at runtime (confirmed by tutorial reaching step 1 which requires sprinting+moving; peak sprint speed 6.42 m/s asymptotes toward 6.5 m/s target)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "7/8 review bullets fully pass; 1 spec-strict fail (tutorial deferral); 1 partial (ending card DOM under forced timings)"},
+  "test_credentials": "None — public game",
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Movement fix + Tutorial state machine are functionally correct — all 6 tutorial steps advance in headless within ~40s wall-clock with generous waits. Peak sprint speed hits ~6.4 m/s. ONE real bug: Tutorial deferral doesn't work when window.__wnl.pause() is called (root cause: tutorial.update() sits after the _paused early-return in Game._loop). Note: gs method is `addHealth(delta)` — the review request's `updateHealth()` name is wrong. Ending card cannot be observed in headless via cinematic._t forcing — use gameState.endingKind + gameState.health to validate choice logic. Menu buttons need >=800px viewport height to avoid the endings-count text overlapping the Credits button.",
+  "rca_of_the_issue": "Tutorial deferral: Game._loop returns at line 622-626 when this._paused===true, BEFORE calling tutorial.update(dt) at line 709. Therefore Tutorial._shouldDefer()'s `if (g._paused) return true` branch is unreachable via the paused path — the tutorial simply stops receiving update ticks and its _deferred stays whatever it was (false), leaving the hint DOM in place. Fix: hoist tutorial.update() above the paused return in Game._loop with dt=0 (so it can observe pause state without advancing timers), OR mutate tutorial._deferred + emit tutorial_hint(null) directly from Game.pause() and re-emit the current step's text from Game.resume()."
+}

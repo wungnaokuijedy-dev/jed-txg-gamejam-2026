@@ -614,6 +614,9 @@ export class Character {
 
     this.facingY = 0;
     this.prevFacingY = 0;
+    // Angular velocity for the critically-damped facing spring (Phase 6 fix).
+    // Kept as a scalar; consumed by _smoothDampAngle each frame.
+    this._yawVel = 0;
 
     // Body-lean state (smoothly damped)
     this.leanX = 0; // pitch — forward lean into acceleration
@@ -647,6 +650,32 @@ export class Character {
   // speedNormalized = horizSpeed / runSpeed
   // grounded = bool
   // movingDirYaw = radians (or null)
+  // Unity-style critically-damped angle spring. Returns { value, velocity }.
+  // Time to reach ~99% of the target ≈ smoothTime * 2. No overshoot.
+  _smoothDampAngle(current, target, currentVelocity, smoothTime, dt) {
+    smoothTime = Math.max(0.0001, smoothTime);
+    // Wrap difference into shortest arc
+    let diff = current - target;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    const originalTo = target;
+    const targetSnap = current - diff;
+
+    const omega = 2 / smoothTime;
+    const x = omega * dt;
+    const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+
+    const temp = (currentVelocity + omega * diff) * dt;
+    let newVel = (currentVelocity - omega * temp) * exp;
+    let output = (current - diff) + (diff + temp) * exp;
+    // Anti-overshoot clamp
+    if ((originalTo - current > 0.0) === (output > originalTo)) {
+      output = originalTo;
+      newVel = (output - originalTo) / dt;
+    }
+    return { value: output, velocity: newVel };
+  }
+
   updateAnimation(dt, speedNormalized, grounded, movingDirYaw) {
     // ---- Blends ----
     const targetMove = Math.min(1.2, speedNormalized);
@@ -664,14 +693,19 @@ export class Character {
     const cyclesPerS = grounded ? Math.max(0.0, horizSpeed / strideCyc) : 0.0;
     this.phase += dt * cyclesPerS * Math.PI * 2;
 
-    // ---- Facing: smooth toward target (max ~12 rad/s) ----
+    // ---- Facing: critically-damped angle spring toward target ----
+    // Fixes: (a) alternating A↔D jitter (constant-rate clamp gave instantaneous
+    // direction reversal), (b) snap-at-end of a 90° turn (constant velocity
+    // stopped abruptly). smoothTime≈0.15 → ~0.30 s to settle a 90° turn with
+    // ease-in and ease-out, no overshoot.
     this.prevFacingY = this.facingY;
     if (movingDirYaw !== null && movingDirYaw !== undefined) {
-      let diff = movingDirYaw - this.facingY;
-      while (diff >  Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      const step = THREE.MathUtils.clamp(diff, -dt * 12, dt * 12);
-      this.facingY += step;
+      const r = this._smoothDampAngle(this.facingY, movingDirYaw, this._yawVel, 0.15, dt);
+      this.facingY = r.value;
+      this._yawVel = r.velocity;
+    } else {
+      // No movement input — bleed off yaw velocity so idle doesn't drift.
+      this._yawVel = THREE.MathUtils.damp(this._yawVel, 0, 8, dt);
     }
     this.model.rotation.y = this.facingY;
 

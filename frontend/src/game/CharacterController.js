@@ -35,6 +35,16 @@ export class CharacterController {
     this.jumpBuffer = 0;
     this.playerRadius = 0.35;
 
+    // ---- Feel smoothing state (Phase 6 fix) ----
+    // Smoothed wish direction so A↔D taps or diagonal flips don't cause
+    // single-frame twitches. Lerped toward raw input over ~100 ms.
+    this._smoothedWish = new THREE.Vector3();
+    // Smoothed target speed so Shift on/off eases walk↔run instead of stepping.
+    // Everything derived from speed (stride, lean, moveBlend) reads the actual
+    // horizontal velocity — which is already smoothed — this just softens
+    // the target so the ramp is exponential rather than a linear-time snap.
+    this._targetSpeedSm = this.walkSpeed;
+
     // Initial ground snap
     const p = this.character.root.position;
     p.y = sampleHeight(p.x, p.z);
@@ -80,27 +90,47 @@ export class CharacterController {
     if (this.input.isMoveRight()) ix += 1;
     if (this.input.isMoveLeft()) ix -= 1;
 
-    _wishDir.set(0, 0, 0);
+    // Raw wish direction from this frame's input
+    const _rawWish = _tmp.set(0, 0, 0);
     if (ix !== 0 || iz !== 0) {
-      _wishDir.copy(_fwd).multiplyScalar(iz).add(_tmp.copy(_right).multiplyScalar(ix));
-      _wishDir.y = 0;
-      if (_wishDir.lengthSq() > 1e-6) _wishDir.normalize();
+      _rawWish.copy(_fwd).multiplyScalar(iz)
+              .add(new THREE.Vector3().copy(_right).multiplyScalar(ix));
+      _rawWish.y = 0;
+      if (_rawWish.lengthSq() > 1e-6) _rawWish.normalize();
     }
+    // Smooth the wish direction toward the raw input over ~100 ms so rapid
+    // A↔D wiggles or diagonal single-frame flips don't twitch the body.
+    // damp() is a first-order low-pass: current + (target - current) * (1 - exp(-lambda*dt))
+    const wishLambda = 12;   // ~0.083 s time constant → 95% in ~250 ms
+    this._smoothedWish.x = THREE.MathUtils.damp(this._smoothedWish.x, _rawWish.x, wishLambda, dt);
+    this._smoothedWish.z = THREE.MathUtils.damp(this._smoothedWish.z, _rawWish.z, wishLambda, dt);
+    _wishDir.copy(this._smoothedWish);
+    // Renormalise so magnitude is 0..1 and diagonal doesn't sneak past 1.
+    const sq = _wishDir.x * _wishDir.x + _wishDir.z * _wishDir.z;
+    if (sq > 1) _wishDir.multiplyScalar(1 / Math.sqrt(sq));
 
-    const sprinting = this.input.isSprint() && _wishDir.lengthSq() > 0;
-    const targetSpeed = sprinting ? this.runSpeed : this.walkSpeed;
+    // "Moving input" — true while there is any pushed direction, using the
+    // raw signal so releasing all keys transitions to decel immediately.
+    const isMovingInput = (ix !== 0 || iz !== 0);
+    const sprinting = this.input.isSprint() && isMovingInput;
+
+    // Smooth the target speed. Accel time constant is a touch faster than
+    // decel so pressing Shift feels responsive but releasing it eases down.
+    const rawTargetSpeed = sprinting ? this.runSpeed : this.walkSpeed;
+    const speedLambda = (rawTargetSpeed > this._targetSpeedSm) ? 4 : 3;   // ~0.25 s up, ~0.33 s down
+    this._targetSpeedSm = THREE.MathUtils.damp(this._targetSpeedSm, rawTargetSpeed, speedLambda, dt);
+    const targetSpeed = isMovingInput ? this._targetSpeedSm : 0;
 
     // Horizontal velocity target
-    const targetVel = _tmp.copy(_wishDir).multiplyScalar(targetSpeed);
+    const targetVel = new THREE.Vector3().copy(_wishDir).multiplyScalar(targetSpeed);
 
     _horiz.set(c.velocity.x, 0, c.velocity.z);
-    const isMovingInput = _wishDir.lengthSq() > 0;
     const rate = this.grounded
       ? (isMovingInput ? this.accel : this.decel)
       : this.accel * this.airControl;
 
     // Move horizontal velocity toward target
-    const delta = _tmp.copy(targetVel).sub(_horiz);
+    const delta = new THREE.Vector3().copy(targetVel).sub(_horiz);
     const step = rate * dt;
     if (delta.length() <= step) _horiz.copy(targetVel);
     else _horiz.add(delta.setLength(step));

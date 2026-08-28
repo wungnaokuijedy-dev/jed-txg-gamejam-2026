@@ -1084,3 +1084,49 @@ html, body, #root {
   border-radius: 999px;
 }
 
+
+/* Tutorial hint — bottom-center, soft floating card. Above the prompt slot,
+   below the subtitle. Never covers the objective (top-center) or prompt-hud. */
+.wnl-tutorial-hint {
+  position: absolute;
+  bottom: 22vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  padding: 8px 20px;
+  border-radius: 999px;
+  color: rgba(232, 242, 226, 0.95);
+  background: rgba(15, 25, 22, 0.55);
+  border: 1px solid rgba(200, 220, 210, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  font-style: italic;
+  font-size: 1rem;
+  letter-spacing: 0.14em;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  animation: wnl-tutorial-in 420ms ease-out both;
+  max-width: 58vw;
+  text-align: center;
+}
+@keyframes wnl-tutorial-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.wnl-high-contrast .wnl-tutorial-hint {
+  background: rgba(0, 0, 0, 0.72);
+  border-color: rgba(240, 250, 240, 0.85);
+}
+.wnl-text-s .wnl-tutorial-hint { font-size: 0.88rem; }
+.wnl-text-l .wnl-tutorial-hint { font-size: 1.2rem; }
+
+/* Mini-map pulse — soft outer glow the tutorial "M" step uses to point the eye */
+.wnl-minimap.is-pulsing {
+  animation: wnl-minimap-pulse 900ms ease-out 2;
+}
+@keyframes wnl-minimap-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(180, 220, 180, 0.0); }
+  40%  { box-shadow: 0 0 0 10px rgba(180, 220, 180, 0.55); }
+  100% { box-shadow: 0 0 0 22px rgba(180, 220, 180, 0.0); }
+}
+

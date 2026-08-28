@@ -373,10 +373,15 @@ export function ConfirmOverwrite({ onCancel, onConfirm }) {
 // -------------------------------------------------------
 // Mini-map (top-right HUD)
 // -------------------------------------------------------
-export function MiniMap({ game, show }) {
+export function MiniMap({ game, show, pulse = 0 }) {
   const canvasRef = useRef(null);
   const rafRef = useRef(0);
   const lastBlitRef = useRef(0);
+  const [pulseKey, setPulseKey] = useState(0);
+  useEffect(() => {
+    // Re-mount the pulse animation whenever the parent bumps `pulse`.
+    if (pulse > 0) setPulseKey(pulse);
+  }, [pulse]);
   useEffect(() => {
     if (!show || !game) return;
     let alive = true;
@@ -405,14 +410,31 @@ export function MiniMap({ game, show }) {
   }, [show, game]);
   return (
     <div
-      className={`wnl-minimap ${show ? 'is-visible' : ''}`}
+      className={`wnl-minimap ${show ? 'is-visible' : ''} ${pulseKey ? 'is-pulsing' : ''}`}
       data-testid="minimap"
       aria-hidden
+      key={`mm-${pulseKey}`}
     >
       <canvas ref={canvasRef} className="wnl-minimap-canvas" data-testid="minimap-canvas" />
     </div>
   );
 }
+
+// -------------------------------------------------------
+// Tutorial hint — small floating card bottom-center, above the prompt slot.
+// -------------------------------------------------------
+export function TutorialHint({ text }) {
+  if (!text) return null;
+  return (
+    <div className="wnl-tutorial-hint" data-testid="tutorial-hint" key={text}>
+      {text}
+    </div>
+  );
+}
+
+// -------------------------------------------------------
+// Autosave leaf tick
+// -------------------------------------------------------
 
 export function AutosaveTick({ show }) {
   if (!show) return null;

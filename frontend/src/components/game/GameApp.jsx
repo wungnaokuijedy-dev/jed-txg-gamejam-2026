@@ -3,7 +3,7 @@ import { Game } from '../../game/Game.js';
 import { resetMapCache } from '../../game/Map.js';
 import {
   MainMenu, PauseMenu, SettingsScreen, ControlsScreen, CreditsScreen,
-  MapScreen, ConfirmOverwrite, AutosaveTick, DegradeNotice, MiniMap,
+  MapScreen, ConfirmOverwrite, AutosaveTick, DegradeNotice, MiniMap, TutorialHint,
 } from './Menus.jsx';
 
 // ---------- HUD icons ----------
@@ -95,6 +95,8 @@ export default function GameApp() {
   const [degradeMsg, setDegradeMsg] = useState(null);
   const degradeTimerRef = useRef(null);
   const [silenceMood, setSilenceMood] = useState(false);
+  const [tutorialText, setTutorialText] = useState(null);
+  const [minimapPulse, setMinimapPulse] = useState(0);   // increments to retrigger the CSS animation
 
   // Refs to expose current state to callbacks that only see closure of first mount.
   const screenRef = useRef('loading');
@@ -185,6 +187,8 @@ export default function GameApp() {
         setScreen('ending');
       },
       onSilenceMood: (on) => { if (!cancelled) setSilenceMood(!!on); },
+      onTutorialHint: ({ text }) => { if (!cancelled) setTutorialText(text || null); },
+      onMinimapPulse: () => { if (!cancelled) setMinimapPulse((k) => k + 1); },
       onAutosave: () => {
         if (cancelled) return;
         setAutosaveOn(true);
@@ -245,6 +249,7 @@ export default function GameApp() {
         if (choiceOpen) return;   // do not steal the choice moment
         if (ending) return;
         setOverlay('map');
+        if (gameRef.current && gameRef.current.tutorial) gameRef.current.tutorial.markMapOpened();
         return;
       }
       if (e.code === 'Escape') {
@@ -487,7 +492,13 @@ export default function GameApp() {
           && !ending
           && !!(settingsValues && settingsValues.minimap)
         }
+        pulse={minimapPulse}
       />
+
+      {/* Tutorial hint (bottom-center, above prompt slot). Only when playing. */}
+      {screen === 'playing' && !pauseMenu && !overlay && !ending && !hudHidden && !choiceOpen && (
+        <TutorialHint text={tutorialText} />
+      )}
 
       {/* Degrade notice */}
       {degradeMsg && <DegradeNotice preset={degradeMsg} />}
@@ -562,7 +573,10 @@ export default function GameApp() {
       {screen === 'playing' && pauseMenu && !overlay && (
         <PauseMenu
           onResume={pauseResume}
-          onMap={() => setOverlay('map')}
+          onMap={() => {
+            setOverlay('map');
+            if (gameRef.current && gameRef.current.tutorial) gameRef.current.tutorial.markMapOpened();
+          }}
           onSettings={goSettings}
           onRestartArea={pauseRestartArea}
           onMainMenu={pauseMainMenu}

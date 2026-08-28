@@ -82,6 +82,8 @@ Two decorative faces are *listed* as preferred choices in the map canvas font st
 | **1 / 2 / 3** | Pick a choice (Take / Leave / Share) at the Heartseed |
 | **F3** | Toggle debug HUD (FPS / position / area) — **off by default** |
 
+**HUD elements** (top-left health tier + seeds badge, top-center objective whisper, **top-right journal mini-map** — parchment-styled with player facing wedge and discovered-only regions; toggle in **Settings → HUD**).
+
 ---
 
 ## How to run

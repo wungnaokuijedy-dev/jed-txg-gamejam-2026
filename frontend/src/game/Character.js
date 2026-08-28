@@ -19,6 +19,7 @@
 //    - Ponytail 4-segment angular-spring chain with lag + whip + wind.
 
 import * as THREE from 'three';
+import { sampleHeight } from './Terrain.js';
 
 // ==== Palette ====
 const SKIN         = 0xf5cfae;
@@ -281,6 +282,22 @@ export class Character {
   constructor() {
     this.root = new THREE.Group();
     this.root.name = 'explorer';
+
+    // Contact blob shadow — a soft dark disc under the feet. Guarantees she
+    // reads as grounded even when the shadow map is disabled (Low quality) or
+    // when she's on a slope where the projected shadow lands off-camera.
+    const blobGeo = new THREE.CircleGeometry(0.55, 20);
+    const blobMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.30,
+      depthWrite: false,
+    });
+    this.contactBlob = new THREE.Mesh(blobGeo, blobMat);
+    this.contactBlob.rotation.x = -Math.PI / 2;
+    this.contactBlob.position.y = 0.015;   // just above terrain to avoid z-fight
+    this.contactBlob.renderOrder = -1;
+    this.root.add(this.contactBlob);
 
     this.model = new THREE.Group();
     this.root.add(this.model);
@@ -675,6 +692,11 @@ export class Character {
     const scaleXZ  = 1 + this.squash * 0.18;
     this.body.scale.set(scaleXZ, scaleY, scaleXZ);
     this.body.position.y = 0.95 + idleBob * (1 - this.moveBlend) + walkBob;
+    // Hip sway (side-to-side) + shoulder counter-rotation for natural gait
+    const hipSway = Math.sin(this.phase) * 0.04 * this.moveBlend;
+    this.body.position.x = hipSway * 0.5;
+    const shoulderCounterY = Math.sin(this.phase + Math.PI) * 0.12 * this.moveBlend;
+    this.body.rotation.y = shoulderCounterY * 0.35;
 
     // ---- Body lean into turns + acceleration ----
     let yawRate = (this.facingY - this.prevFacingY) / Math.max(dt, 1e-4);
@@ -701,15 +723,29 @@ export class Character {
     this.elbowR.rotation.x = elbowBend;
 
     // ---- Legs — opposite of arms, kills mid-stride freeze at rest ----
-    this.hipL.rotation.x = -swing * legSwingAmp + this.airBlend * 0.28;
-    this.hipR.rotation.x =  swing * legSwingAmp + this.airBlend * 0.42;
-    // Knee bend on back-swing
-    this.kneeL.rotation.x = Math.max(0,  swingCos) * 0.55 * this.moveBlend + this.airBlend * 0.35;
-    this.kneeR.rotation.x = Math.max(0, -swingCos) * 0.55 * this.moveBlend + this.airBlend * 0.5;
+    // Asymmetric swing: fast in the air (foot lifts crisply), slow near ground
+    // contact so feet don't visibly "swim". Bias the sine slightly for plant.
+    const swingRaw = swing;                         // symmetric sine
+    // Foot-plant bias: soften the pass through zero (plant) and sharpen the peaks.
+    const swingBias = Math.sign(swingRaw) * Math.pow(Math.abs(swingRaw), 0.85);
+    this.hipL.rotation.x = -swingBias * legSwingAmp + this.airBlend * 0.28;
+    this.hipR.rotation.x =  swingBias * legSwingAmp + this.airBlend * 0.42;
+    // Knee flexion during forward swing (leg lifts) so it isn't a peg leg.
+    const kneeLBend = Math.max(0,  swingCos) * 0.55 * this.moveBlend
+                    + Math.max(0, -swingRaw) * 0.28 * this.moveBlend
+                    + this.airBlend * 0.35;
+    const kneeRBend = Math.max(0, -swingCos) * 0.55 * this.moveBlend
+                    + Math.max(0,  swingRaw) * 0.28 * this.moveBlend
+                    + this.airBlend * 0.5;
+    this.kneeL.rotation.x = kneeLBend;
+    this.kneeR.rotation.x = kneeRBend;
 
-    // ---- Head — tuck slightly in air, gentle idle look ----
+    // ---- Head — tuck slightly in air, gentle idle look, COUNTER-BOB while moving.
+    // The head counter-bobs against walkBob so the "camera-eye" stays calmer.
+    // Also lean-oppose so the head stays roughly upright during banked turns.
     this.headPivot.rotation.x = -0.05 + this.airBlend * 0.22 + Math.sin(t * 1.4) * 0.02 * (1 - this.moveBlend);
-    this.headPivot.rotation.z = idleSway * 0.15 * (1 - this.moveBlend) + this.leanZ * -0.35;
+    this.headPivot.rotation.z = idleSway * 0.15 * (1 - this.moveBlend) + this.leanZ * -0.55;
+    this.headPivot.position.y = 0.5 - walkBob * 0.6;
 
     // ---- Pose override (kneel/reach for interactions) ----
     if (this._poseName === 'kneel') {
@@ -739,6 +775,19 @@ export class Character {
 
     // ---- Ponytail secondary motion ----
     this._updatePonytail(dt, t, yawRate);
+
+    // ---- Contact blob shadow: keep at terrain height regardless of jump ----
+    if (this.contactBlob) {
+      const rp = this.root.position;
+      const groundY = sampleHeight(rp.x, rp.z);
+      // Local Y so world Y = groundY + 0.015
+      this.contactBlob.position.y = (groundY - rp.y) + 0.015;
+      // Fade + shrink slightly while airborne
+      const air = this.airBlend;
+      this.contactBlob.material.opacity = 0.30 * (1 - air * 0.7);
+      const s = 1 - air * 0.35;
+      this.contactBlob.scale.setScalar(s);
+    }
   }
 
   _updatePonytail(dt, tNow, yawRate) {

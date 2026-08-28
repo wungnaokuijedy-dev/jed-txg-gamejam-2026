@@ -21,6 +21,8 @@ export const DEFAULT_SETTINGS = {
   textSize: 'medium',       // 's' | 'medium' | 'l'
   screenShake: true,        // kills sway if false
   highContrast: false,
+  // HUD
+  minimap: true,            // mini-map top-right, default on
 };
 
 export function loadSettings() {

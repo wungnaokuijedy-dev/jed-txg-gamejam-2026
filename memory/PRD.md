@@ -232,3 +232,39 @@ Jam judge / player on a desktop Chrome browser. No authentication. No accounts.
 - Production bundle: **231.09 kB gzipped JS + 12.44 kB gzipped CSS** — well under the jam limit.
 - Full report: `/app/test_reports/iteration_2.json`.
 
+
+## Phase 6 additions (Feb 2026 — feel + visuals + mini-map)
+Hard constraint honoured: **zero changes to gameplay logic, story, objectives, puzzles, Forest Health, endings, or saves.** All Phase 3-5 acceptance tests still pass, all `data-testid`s preserved.
+
+### Movement & animation polish (Character.js `updateAnimation`)
+- **Foot-plant curve**: `swingBias = sign(swing) * pow(|swing|, 0.85)` softens the pass through ground contact so feet don't visibly "swim". Applied to hip rotations.
+- **Knee flexion during forward swing**: two-term bend (`swingCos` back-swing plant + `-swingRaw` forward-swing lift) so the leg lifts through the walk cycle instead of pegging.
+- **Hip sway + shoulder counter-rotation**: `body.position.x` and `body.rotation.y` picked up small opposed sine motion, scaled by `moveBlend`. Amplitude tiny (max ~2 cm / ~0.04 rad) so it reads as gait, not a wobble.
+- **Head stabilization**: `headPivot.position.y = 0.5 − walkBob * 0.6` counter-bobs the head against the walk bob so the third-person "view" stays calm. Also strengthened head-vs-lean opposition (`headPivot.rotation.z = leanZ * -0.55`).
+- Existing banked-lean into turns (`leanZ` clamped ±0.22) preserved unchanged; combined with the new head opposition it gives the "cinematic head-stable during a hard turn" effect.
+
+### Character visual fidelity
+- **Contact blob shadow**: soft 55 cm dark disc parented to `character.root`, drawn just above terrain (world y = groundY + 0.015). Kept grounded during jumps by writing `contactBlob.position.y = (groundY − root.y) + 0.015` each frame; opacity + scale fade with `airBlend` so it doesn't stick to her feet mid-jump. Guarantees the heroine reads as grounded even on **Low** quality where the sun shadow map is disabled.
+- **Softer shadow edges**: `sun.shadow.radius = 4` for PCF blur; **tighter bias** (`-0.00028`) and `normalBias = 0.028` — no more peter-panning at her feet.
+
+### Grass upgrade (biggest visual win)
+- `makeSwayMaterial` gained an `interactive` mode. The grass tuft material now injects an extra vertex block that:
+  - Adds a **layered wind gust** term: cheap smoothed noise `wnlSmoothNoise(vec2(ix*0.06 − uTime*0.25, iz*0.06 + uTime*0.12))` scaled through `smoothstep(0.35, 0.9)`; multiplied into `bendFactor` so the field ripples with traveling gust waves rather than a uniform sine.
+  - Reads a **player-position uniform** `uPlayerPos` and **bends blade tips radially away** within `uInteractRadius = 1.35 m`, with a `k = (1 − d/R)^2` falloff. Blades also compress ~25% under the falloff so the field visibly parts under the heroine's feet.
+- All new code guarded by `#ifdef USE_INSTANCING` so the grass depth prepass and non-instanced compile paths still succeed.
+- Per-frame update: `Game._loop` now writes `character.root.position` into every sway material's `uPlayerPos` uniform (only the interactive grass reads it).
+
+### Mini-map (new HUD, top-right)
+- Reuses the offscreen static-layer cache from `Map.js`. New `renderMiniMap(canvas, opts)` blits a `340×340` crop centered on the player into a `180×180` circular-clipped canvas, then stamps the compass-rose player marker at the center; a `2 px` ink border + tiny italic "N" tick complete the parchment tile.
+- Redraws at ~15 Hz from an `rAF` loop inside the `<MiniMap>` React component; cheap enough to sit alongside the game render.
+- Auto-hides during cinematics (`hudHidden`), pause menu, all overlays (settings/controls/credits/map/confirm-new), choice UI, and endings. Softly fades and scales in/out (`opacity + transform` transitions, 380 ms).
+- New Setting: `HUD → Mini-map` toggle (default **On**), persisted in `wnl_settings_v1`, `data-testid="setting-minimap"`.
+- **Autosave leaf tick relocated to top-left** (`left: 84 px, top: 22 px`) so it doesn't collide with the mini-map. This is the one HUD element allowed to move per spec.
+- README's HUD line updated with a one-liner describing the mini-map.
+
+### Verified — nothing regressed
+- Full ending flow (Guardian ending resolved correctly after Phase 6 build).
+- Zero console errors after the initial shader fix (`#ifdef USE_INSTANCING` guard on the new interaction block).
+- Bundle: **232.9 kB gzipped JS (+1.8 kB from Phase 5) + 12.6 kB gzipped CSS**. Well under jam limits.
+- Instance counts unchanged: same ~540 trees / ~150 rocks / 1600 grass tufts / 360 flowers / 60 ferns; no extra draw calls added by Phase 6 (mini-map draws to a 2D canvas, not to the WebGL context).
+

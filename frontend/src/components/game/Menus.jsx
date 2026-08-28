@@ -4,7 +4,7 @@
 // operations. Keyboard shortcuts are handled in GameApp.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { renderMap } from '../../game/Map.js';
+import { renderMap, renderMiniMap } from '../../game/Map.js';
 
 // Single point-of-truth for the creator name shown on the Credits screen.
 // The client provides the entrant name — swap this constant to update.
@@ -209,6 +209,9 @@ export function SettingsScreen({ values, onChange, onBack }) {
         <Toggle label="Screen Shake"      value={values.screenShake}   onChange={(v) => onChange({ screenShake: v })}   testid="setting-shake" />
         <Toggle label="High Contrast UI"  value={values.highContrast} onChange={(v) => onChange({ highContrast: v })} testid="setting-contrast" />
 
+        <div className="wnl-section-title">HUD</div>
+        <Toggle label="Mini-map" value={values.minimap} onChange={(v) => onChange({ minimap: v })} testid="setting-minimap" />
+
         <div className="wnl-screen-footer">
           <button className="wnl-menu-btn" onClick={onBack} data-testid="screen-back-btn">
             <span className="wnl-menu-btn-label">Back</span>
@@ -368,8 +371,49 @@ export function ConfirmOverwrite({ onCancel, onConfirm }) {
 }
 
 // -------------------------------------------------------
-// Autosave leaf tick
+// Mini-map (top-right HUD)
 // -------------------------------------------------------
+export function MiniMap({ game, show }) {
+  const canvasRef = useRef(null);
+  const rafRef = useRef(0);
+  const lastBlitRef = useRef(0);
+  useEffect(() => {
+    if (!show || !game) return;
+    let alive = true;
+    const loop = (nowMs) => {
+      if (!alive) return;
+      if (canvasRef.current) {
+        const gs = game.gameState;
+        const flags = gs ? gs.puzzleFlags : {};
+        const visited = gs ? gs.visitedAreas : new Set();
+        const p = game.character ? game.character.root.position : { x: 0, z: 22 };
+        const facingY = game.character ? game.character.facingY : 0;
+        // Only re-render at ~15 Hz — cheap enough for a HUD tile.
+        if (nowMs - lastBlitRef.current > 66) {
+          renderMiniMap(canvasRef.current, {
+            flags,
+            visited: visited || new Set(),
+            player: { x: p.x, z: p.z, facingY },
+          });
+          lastBlitRef.current = nowMs;
+        }
+      }
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => { alive = false; if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [show, game]);
+  return (
+    <div
+      className={`wnl-minimap ${show ? 'is-visible' : ''}`}
+      data-testid="minimap"
+      aria-hidden
+    >
+      <canvas ref={canvasRef} className="wnl-minimap-canvas" data-testid="minimap-canvas" />
+    </div>
+  );
+}
+
 export function AutosaveTick({ show }) {
   if (!show) return null;
   return (

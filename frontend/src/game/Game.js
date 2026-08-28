@@ -272,8 +272,11 @@ export class Game {
     const cam = sun.shadow.camera;
     cam.left = -25; cam.right = 25; cam.top = 25; cam.bottom = -25;
     cam.near = 0.5; cam.far = 80;
-    sun.shadow.bias = -0.0005;
-    sun.shadow.normalBias = 0.02;
+    // Tighter bias reduces acne / peter-panning on the heroine's feet, and a
+    // small shadow.radius softens the PCF edge for a filmic look.
+    sun.shadow.bias = -0.00028;
+    sun.shadow.normalBias = 0.028;
+    sun.shadow.radius = 4;
     this.scene.add(sun);
     this.scene.add(sun.target);
     this.sun = sun;
@@ -704,8 +707,17 @@ export class Game {
 
     // Sway uniforms
     if (this.swayMaterials) {
+      const px = this.character ? this.character.root.position.x : 0;
+      const py = this.character ? this.character.root.position.y : 0;
+      const pz = this.character ? this.character.root.position.z : 0;
       for (const m of this.swayMaterials) {
-        if (m.userData && m.userData.shader) m.userData.shader.uniforms.uTime.value = now;
+        if (m.userData && m.userData.shader) {
+          m.userData.shader.uniforms.uTime.value = now;
+          // Push player position only into materials that use it (interactive grass)
+          if (m.userData.interactive && m.userData.shader.uniforms.uPlayerPos) {
+            m.userData.shader.uniforms.uPlayerPos.value.set(px, py, pz);
+          }
+        }
       }
     }
     if (this.mist && this.mist.userData.material) {

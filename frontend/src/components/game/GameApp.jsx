@@ -3,7 +3,7 @@ import { Game } from '../../game/Game.js';
 import { resetMapCache } from '../../game/Map.js';
 import {
   MainMenu, PauseMenu, SettingsScreen, ControlsScreen, CreditsScreen,
-  MapScreen, ConfirmOverwrite, AutosaveTick, DegradeNotice,
+  MapScreen, ConfirmOverwrite, AutosaveTick, DegradeNotice, MiniMap,
 } from './Menus.jsx';
 
 // ---------- HUD icons ----------
@@ -474,6 +474,20 @@ export default function GameApp() {
 
       {/* Autosave leaf tick */}
       <AutosaveTick show={autosaveOn && screen === 'playing' && !ending} />
+
+      {/* Mini-map (top-right) — hidden during cinematics, menus, choice, ending */}
+      <MiniMap
+        game={gameRef.current}
+        show={
+          screen === 'playing'
+          && !pauseMenu
+          && !overlay
+          && !hudHidden
+          && !choiceOpen
+          && !ending
+          && !!(settingsValues && settingsValues.minimap)
+        }
+      />
 
       {/* Degrade notice */}
       {degradeMsg && <DegradeNotice preset={degradeMsg} />}

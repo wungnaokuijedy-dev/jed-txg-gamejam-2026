@@ -361,3 +361,57 @@ export function renderMap(canvas, opts) {
 
 // Called on ending "return to woods" to reset the cache so a fresh run rebuilds it.
 export function resetMapCache() { _staticCache = null; }
+
+// -----------------------------------------------------------
+// Mini-map renderer — top-right HUD tile.
+// Uses the same offscreen static-layer cache renderMap builds. Blits a
+// cropped square centered on the player, circularly clipped, then draws the
+// player marker at the center of the tile.
+// -----------------------------------------------------------
+export function renderMiniMap(canvas, opts) {
+  const SIZE = 180;                    // canvas pixel size (square)
+  const CROP = 340;                    // world-canvas pixels sampled → SIZE
+  if (canvas.width !== SIZE) { canvas.width = SIZE; canvas.height = SIZE; }
+  const ctx = canvas.getContext('2d');
+  const flags = opts.flags || {};
+  const visited = opts.visited || new Set();
+  const hash = staticHash(flags, visited);
+  if (!_staticCache || _staticCache.hash !== hash) {
+    const off = document.createElement('canvas');
+    off.width = CAN_W; off.height = CAN_H;
+    drawStaticLayer(off.getContext('2d'), flags, visited);
+    _staticCache = { hash, canvas: off };
+  }
+  ctx.clearRect(0, 0, SIZE, SIZE);
+  ctx.save();
+  // Circular clip
+  ctx.beginPath();
+  ctx.arc(SIZE / 2, SIZE / 2, SIZE / 2 - 4, 0, Math.PI * 2);
+  ctx.clip();
+  // Fill inside with parchment tint even where the crop leaves the source
+  ctx.fillStyle = '#e0cea0';
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  // Compute source rect on the big canvas centered on the player
+  const p = opts.player || { x: 0, z: 22, facingY: 0 };
+  const [pxc, pyc] = worldToCanvas(p.x, p.z);
+  const sx = pxc - CROP / 2;
+  const sy = pyc - CROP / 2;
+  ctx.drawImage(_staticCache.canvas, sx, sy, CROP, CROP, 0, 0, SIZE, SIZE);
+  // Player marker at the center of the tile
+  drawHeroineMarker(ctx, SIZE / 2, SIZE / 2, p.facingY || 0);
+  ctx.restore();
+  // Ink circle border (drawn without the clip so it isn't cut off)
+  ctx.strokeStyle = 'rgba(60,40,20,0.8)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(SIZE / 2, SIZE / 2, SIZE / 2 - 4, 0, Math.PI * 2);
+  ctx.stroke();
+  // Small "N" tick at top of the ring
+  ctx.save();
+  ctx.fillStyle = '#3a2410';
+  ctx.font = 'italic bold 11px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('N', SIZE / 2, 12);
+  ctx.restore();
+}

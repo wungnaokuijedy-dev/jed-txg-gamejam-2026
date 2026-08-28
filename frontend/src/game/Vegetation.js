@@ -13,8 +13,13 @@ const _quat = new THREE.Quaternion();
 const _scl = new THREE.Vector3();
 
 // Attach a shared sway uniform to a MeshStandardMaterial and inject vertex code.
-// swayAmount is a per-material amplitude scale.
-function makeSwayMaterial(baseColor, { swayAmount = 0.06, swayFreq = 1.4, roughness = 0.9, flatShading = true } = {}) {
+// swayAmount is a per-material amplitude scale. When `interactive:true` is set,
+// blade tips also bend radially away from the player position (uPlayerPos) so
+// grass parts around the moving heroine — a big "living forest" cue.
+function makeSwayMaterial(baseColor, {
+  swayAmount = 0.06, swayFreq = 1.4, roughness = 0.9,
+  flatShading = true, interactive = false, interactRadius = 1.35,
+} = {}) {
   const mat = new THREE.MeshStandardMaterial({
     color: baseColor,
     roughness,
@@ -23,15 +28,38 @@ function makeSwayMaterial(baseColor, { swayAmount = 0.06, swayFreq = 1.4, roughn
   });
   mat.userData.swayAmount = swayAmount;
   mat.userData.swayFreq = swayFreq;
+  mat.userData.interactive = interactive;
+  mat.userData.interactRadius = interactRadius;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 };
     shader.uniforms.uSwayAmount = { value: mat.userData.swayAmount };
     shader.uniforms.uSwayFreq = { value: mat.userData.swayFreq };
+    shader.uniforms.uPlayerPos = { value: new THREE.Vector3(0, 0, 22) };
+    shader.uniforms.uInteractRadius = { value: mat.userData.interactRadius };
+    shader.uniforms.uInteractive = { value: interactive ? 1.0 : 0.0 };
     mat.userData.shader = shader;
     shader.vertexShader = `
       uniform float uTime;
       uniform float uSwayAmount;
       uniform float uSwayFreq;
+      uniform vec3  uPlayerPos;
+      uniform float uInteractRadius;
+      uniform float uInteractive;
+
+      // Cheap smoothed noise for gust waves (traveling wind fronts across the map).
+      float wnlNoise(vec2 p) {
+        return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+      }
+      float wnlSmoothNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = wnlNoise(i);
+        float b = wnlNoise(i + vec2(1.0, 0.0));
+        float c = wnlNoise(i + vec2(0.0, 1.0));
+        float d = wnlNoise(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
     ` + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
@@ -44,9 +72,33 @@ function makeSwayMaterial(baseColor, { swayAmount = 0.06, swayFreq = 1.4, roughn
          float iz = 0.0;
        #endif
        float phase = uTime * uSwayFreq + ix * 0.13 + iz * 0.17;
-       float bendFactor = max(0.0, position.y) * uSwayAmount;
+       // Layered wind: base sway + slow-traveling gust wave across the map.
+       float gustDir = 1.0;
+       float gust = wnlSmoothNoise(vec2(ix * 0.06 - uTime * 0.25, iz * 0.06 + uTime * 0.12));
+       gust = smoothstep(0.35, 0.9, gust);
+       float bendFactor = max(0.0, position.y) * uSwayAmount * (1.0 + gust * 0.9);
        transformed.x += sin(phase) * bendFactor;
        transformed.z += cos(phase * 0.87 + 1.3) * bendFactor * 0.75;
+
+       // Player-interaction bend — top-of-blade only, radial push away.
+       #ifdef USE_INSTANCING
+       if (uInteractive > 0.5 && position.y > 0.05) {
+         vec3 worldPos = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+         vec3 rel = worldPos - uPlayerPos;
+         rel.y = 0.0;
+         float d = length(rel);
+         if (d < uInteractRadius && d > 0.001) {
+           float k = 1.0 - (d / uInteractRadius);
+           k = k * k;
+           vec3 dir = normalize(rel);
+           float push = k * position.y * 0.75;
+           transformed.x += dir.x * push;
+           transformed.z += dir.z * push;
+           // Also compress the blade slightly so it visibly flattens under feet
+           transformed.y -= k * position.y * 0.25;
+         }
+       }
+       #endif
       `
     );
   };
@@ -319,7 +371,10 @@ export function buildVegetation(mood) {
   const grassGeoA = new THREE.PlaneGeometry(0.4, 0.55).translate(0, 0.275, 0);
   const grassGeoB = new THREE.PlaneGeometry(0.4, 0.55).rotateY(Math.PI / 2).translate(0, 0.275, 0);
   const grassGeo = mergeGeometries([grassGeoA, grassGeoB]);
-  const grassMat = makeSwayMaterial(new THREE.Color(0x6c9660).multiply(mood.foliageTint), { swayAmount: 0.18, swayFreq: 2.4, roughness: 1.0 });
+  const grassMat = makeSwayMaterial(new THREE.Color(0x6c9660).multiply(mood.foliageTint), {
+    swayAmount: 0.18, swayFreq: 2.4, roughness: 1.0,
+    interactive: true, interactRadius: 1.35,
+  });
   grassMat.side = THREE.DoubleSide;
   swayMaterials.push(grassMat);
 

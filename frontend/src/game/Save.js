@@ -15,6 +15,7 @@ export function save(gameState, character, weatherStage) {
       seeds: gameState.seeds,
       flags: gameState.puzzleFlags,
       done: Array.from(gameState.doneInteractions),
+      visited: Array.from(gameState.visitedAreas || []),
       objective: gameState.objective,
       moodT: gameState._moodT,
       weatherStage,
@@ -53,6 +54,7 @@ export function apply(data, gameState, character, weather) {
     gameState.seeds = data.seeds ?? 0;
     gameState.puzzleFlags = { ...gameState.puzzleFlags, ...(data.flags || {}) };
     gameState.doneInteractions = new Set(data.done || []);
+    gameState.visitedAreas = new Set(data.visited || []);
     if (data.objective) gameState.objective = data.objective;
     gameState._moodT = data.moodT ?? gameState._healthToMoodT(gameState.health);
     gameState._moodTTarget = gameState._moodT;

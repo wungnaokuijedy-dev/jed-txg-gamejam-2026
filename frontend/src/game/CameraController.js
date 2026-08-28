@@ -30,6 +30,8 @@ export class CameraController {
     this.currentDistance = this.distance;
 
     this.sensitivity = 0.0025;
+    this.invertY = false;
+    this.screenShake = true;
     this.followSpeed = 12;
 
     // Handheld sway state (very small amplitudes to avoid motion sickness)
@@ -51,7 +53,8 @@ export class CameraController {
     const [dx, dy] = this.input.consumeMouseDelta();
     if (this.input.pointerLocked) {
       this.yaw -= dx * this.sensitivity;
-      this.pitch -= dy * this.sensitivity;
+      const dyEff = this.invertY ? -dy : dy;
+      this.pitch -= dyEff * this.sensitivity;
       if (this.pitch < this.minPitch) this.pitch = this.minPitch;
       if (this.pitch > this.maxPitch) this.pitch = this.maxPitch;
     }
@@ -106,9 +109,11 @@ export class CameraController {
     this._smoothedPos.y = THREE.MathUtils.damp(this._smoothedPos.y, _targetPos.y, this.followSpeed, dt);
     this._smoothedPos.z = THREE.MathUtils.damp(this._smoothedPos.z, _targetPos.z, this.followSpeed, dt);
 
-    // Subtle handheld sway while moving (tiny amplitude, no motion sickness)
+    // Subtle handheld sway while moving (tiny amplitude, no motion sickness).
+    // Fully suppressed when the accessibility "Screen Shake" toggle is Off.
     this._swayT += dt * (1.6 + sprintBlend * 1.0);
-    const swayAmp = Math.min(1, speed / 5.5) * 0.02;
+    const shakeMul = this.screenShake ? 1 : 0;
+    const swayAmp = Math.min(1, speed / 5.5) * 0.02 * shakeMul;
     const swayX = Math.sin(this._swayT) * swayAmp;
     const swayY = Math.sin(this._swayT * 2.0 + 0.6) * swayAmp * 0.7;
 

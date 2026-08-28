@@ -21,6 +21,9 @@ export class GameState {
     // Track which optional plants / temptation actions have been done
     this.doneInteractions = new Set();
 
+    // Phase 4: which areas the player has visited (used for map reveal).
+    this.visitedAreas = new Set();
+
     // Objective text (short, poetic)
     this.objective = 'The forest is waiting…';
 
@@ -91,6 +94,24 @@ export class GameState {
     return true;
   }
   isDone(id) { return this.doneInteractions.has(id); }
+
+  // Phase 4 — record area visit for the journal map.
+  recordAreaVisit(name) {
+    // Map name → id
+    const idByName = {
+      'The Entrance': 1,
+      'Whispering Woods': 2,
+      'The Silent Stream': 3,
+      'The Ancient Grove': 4,
+      'The Heart of the Forest': 5,
+    };
+    const id = idByName[name];
+    if (!id) return;
+    if (!this.visitedAreas.has(id)) {
+      this.visitedAreas.add(id);
+      this.emit('area_visited', { id, name });
+    }
+  }
 
   setFlag(k, v = true) {
     if (this.puzzleFlags[k] === v) return;

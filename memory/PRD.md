@@ -121,3 +121,79 @@ Jam judge / player on a desktop Chrome browser. No authentication. No accounts.
 - Ending-seen record in localStorage isn't yet surfaced in a collection UI.
 - Continue restores flags + player pos but doesn't currently replay the vine cinematic — visual state (bridge grown, stream flowing, stones glowing, gate opened) is fast-forwarded via `Puzzles.applySavedState()`.
 - Heart choice arc camera framing is decent but the giant heart-tree trunk still occasionally clips the composition on very tall trunks — acceptable for jam quality.
+
+
+## Phase 4 additions (Feb 2026 — this session)
+
+### Main Menu (replaces the bare Click-to-Play)
+- Live 3D forest scene runs behind the menu (game runs in a dedicated **menu-mode** where the camera drifts slowly around spawn, character stands idle, no player input is accepted, mist and swaying vegetation continue). Title "WHERE NATURE LEADS" + tagline *"The forest doesn't tell you where to go. It shows you."* — both fade in.
+- Buttons: **Continue** (only when a save exists), **New Game** (opens overwrite-confirm modal if a save exists), **Settings**, **Controls**, **Credits**. All pill-shaped, italic serif, hover lifts + colour brightens.
+- **Endings row** at the bottom: 3 leaf glyphs, filled if the corresponding ending has been seen (persisted in `wnl_endings_seen`), hollow otherwise. No labels — quiet collectible hint.
+- Overwrite confirm modal: *"Overwrite your walk? A saved walk exists. Starting anew will clear it."* with Cancel / Begin Anew buttons.
+
+### Pause Menu (Esc during gameplay)
+- Buttons: Resume, Map, Settings, Restart Area, Main Menu (autosaves first).
+- `Game.pause()` freezes the loop (skips all `update()` calls but keeps rendering) and calls `AudioContext.suspend()`. `Game.resume()` reverses both and re-locks pointer on Resume click. On resume, `_lastT` is snapped to `now` so `dt` never spikes.
+- **Cinematic behavior**: Esc during a cinematic opens the pause menu. Pausing while a cinematic is playing freezes the cinematic in place (no advance in `_t`), and resuming continues from that frame. No softlocks encountered in test.
+- Restart Area re-spawns the player at the Area 1 entrance, keeps all state (health, seeds, flags), snaps camera behind the character, and re-locks pointer.
+- Main Menu → autosaves (if no ending resolved yet), enters menu-mode, returns to main menu screen. `hasSave` re-queried so the Continue button re-appears immediately.
+
+### Map Screen (M key + Pause menu → Map)
+- **Hand-drawn journal style** rendered programmatically onto a 1080×720 canvas via `Map.js` (`renderMap()`). Parchment gradient + speckle grain + double-frame border, "The Explorer's Journal" title in italic serif.
+- 5 areas as illustrated ink regions with area-specific glyphs (trees for the Entrance, dense trees + bridge for Whispering Woods, ferns for the Silent Stream, one giant tree + stones for the Ancient Grove, massive tree for the Heart). Vine bridge visibly grown when `grow_done`. Stream drawn as a dashed dry line by default, becomes a solid blue flowing curve with lateral shimmer strokes after `restore_done`. Stones turn green when `stones_awoken`. A small green flourish appears next to restored locations.
+- **Progressive reveal**: unvisited areas render as faint dashed ellipses with a "?" glyph. Areas are marked visited via `GameState.recordAreaVisit(name)` fired from the main loop on area change. Visited set is persisted in the save.
+- Player marker: small compass-rose dot with a directional wedge that follows `character.facingY`. Updated every 500 ms while the map is open.
+- Compass rose "N" in the bottom-right.
+- M toggles map from gameplay (Esc closes back to game). From pause, click Map / click Close.
+
+### AudioEngine (`AudioEngine.js`) — 100% procedural, zero external files
+- Master → Music / SFX / Ambient buses feeding `AudioContext.destination`.
+- **Ambience layers (looping):**
+  - Wind — brown-noise buffer through lowpass with an LFO on the filter cutoff.
+  - Insects — bandpass at ~5.8 kHz on white noise, density scales with `healthNorm` and area (denser at the Grove).
+  - Water — brown-noise bandpass, gain rises from 0 → 0.22 when `restore_done` fires.
+  - Rain — white-noise lowpass, gain follows the weather stage (`rain_light` = 0.28, `rain_heavy` = 0.42, dry stages = 0).
+  - Area-based crossfade (~1 s target time) between wind/insect gains when the player crosses an area boundary.
+- **Bird chirps** — spawned procedurally as short pitch-modulated sine bursts (2-4 note warble each) with per-chirp random pitch. Timer between chirps scales with health and pauses during rain.
+- **Music (subtle, generative):**
+  - Detuned-saw pad + sine fifth through a slow-LFO'd lowpass — the base exploration bed.
+  - Second low-triangle "grove pad" fades in when the player enters the Ancient Grove.
+  - Pentatonic melody sequencer schedules 2-4 sine notes with envelopes every 20-32 s (paused during choice + endings).
+  - Modes: `exploration`, `grove` (auto on Ancient Grove enter and on `stones_awoken`), `choice` (near-silence + one sustained 220 Hz sine), `ending_guardian` (major-triad triangle swell), `ending_balance` (suspended-chord triangle swell), `ending_silence` (three sparse fading sines).
+- **Footsteps** — driven by `character.phase` heel-strike zero-crossings; short filtered noise bursts with per-step random bandpass frequency and amplitude, louder + shorter for sprint. Landing thump on `charCtrl.grounded` transition (lowpass brown noise + short sine kick).
+- **SFX bank**: `seed_pickup`, `vine_growth`, `water_release`, `bird_free`, `stone_hum`, `gate_open`, `choice_appear`, `ui_hover`, `ui_click`, `autosave`, `temptation` — all built from oscillators + noise buffers.
+- **Autoplay policy**: `AudioContext` is created and resumed inside `Game.initAudio()`, called from the first menu button click. Visibility-change handler suspends/resumes the context on tab background/foreground.
+
+### Settings (`Settings.js`) — persist to `wnl_settings_v1`, live-apply
+- Audio: Master / Music / SFX / Ambient sliders → immediately push into the corresponding `AudioEngine` bus (`setTargetAtTime` for smooth transitions).
+- Gameplay: Camera Sensitivity (0.25×..2.5× multiplier around the base 0.0025 rad/pixel), Invert Y, Interaction Hints (when off, the "E — verb" prompt is replaced with a small glowing dot), Subtitles (when off, no subtitles render even during cinematics).
+- Graphics: Quality preset Low / Medium / High. `Game.applyQuality(preset)` adjusts `renderer.setPixelRatio`, `renderer.shadowMap.enabled`, `sun.shadow.mapSize`, particle draw ranges (leaves / fireflies / pollen / rain), and grass / bush / flower / fern instanced-mesh visible counts. Trees + rocks stay stable so the world doesn't visibly pop.
+- **Auto-degrade watcher**: if fps < 30 for ~5 s of accumulated samples, one one-time step-down (high → medium, medium → low) with a friendly on-screen notice.
+- Accessibility: Text Size (S / M / L, applied via `wnl-text-*` root classes that scale HUD + subtitle text), Screen Shake toggle (kills the sub-2% handheld camera sway when off), High Contrast UI (adds solid backplates + heavier text shadows to subtitles / objective / prompt).
+
+### Controls Screen
+- Clean list of every key that actually works in-game (WASD/Arrows, Mouse, Shift, Space, E, M, Esc, 1/2/3, F3). No invented bindings.
+
+### Credits Screen
+- Placeholder "your name here" for the creator, Emergent AI (Claude) assistance credit, Three.js (MIT), React (MIT), procedural art + audio note, typography note, TXG Nagaland Game Jam 2026 line. No invented credits.
+
+### Approved carry-over
+- **Autosave leaf tick**: small green leaf glyph + "saved" text fades in top-right on every autosave (event-driven + 30 s interval), fades out after ~1.4 s. Backed by `onAutosave` callback fired from `Game._doAutosave()`. Also plays the quiet `autosave` audio chime.
+
+## Phase 4 acceptance — verified via scripted browser tests
+1. Menu → New Game → gameplay → ending → back to menu; endings row updates (Guardian glyph filled), Continue button hidden (save cleared). ✓
+2. Continue with a real save restores health 60, seeds 1, position (-30, -8), grow_done flag, `rain_light` weather. ✓
+3. Overwrite confirm modal shows only when a save exists; Cancel returns to menu, Begin Anew wipes and starts a new run. ✓
+4. Every setting has an observable effect + persists to localStorage: Master vol → `audio.masterGain.gain.value`, Quality Low → `pixelRatio 1.0` + shadows off + rain drawRange halved (489 → 244) + leaves drawRange halved (154 → 77), Invert Y → `camCtrl.invertY = true`. ✓
+5. Pause: `Game.isPaused() → true`, `audio.ctx.state → 'suspended'`; Resume flips both back. ✓
+6. Map: M key opens; area glyphs, "The Entrance" region visible with tree glyphs, "?" for unvisited; compass rose bottom-right; Esc / M / Close button all dismiss cleanly. ✓
+7. Audio initializes on first menu click (`audio.debug().initialized: true, state: "running"`); music mode transitions verified: `exploration → choice → ending_guardian`. ✓
+8. Autosave path: setting `grow_done` flag fires `onAutosave` → the leaf tick UI. (autosave chime confirmed via `audio.play('autosave')` call in `_doAutosave`.) ✓
+9. Zero console errors across every scripted test. ✓
+
+## Known limitations / Phase 5 backlog
+- No **share-card / photo mode** (kept out of scope per spec).
+- No **Silence ending vignette** (deferred to polish).
+- **AudioContext** starts on the first menu button click — that means a player who never clicks anything but the Continue button on their first-ever visit still triggers audio init (Continue is also a click). Fine.
+- Auto-degrade uses `_degraded` as a one-time latch — deliberately does not step down further. If the player manually raises quality after a degrade, the latch prevents another auto-drop.
+- Map re-renders every 500 ms while open; the parchment texture is redrawn from scratch each time. Cheap enough on desktop but a future pass could cache the static layer to an offscreen canvas.

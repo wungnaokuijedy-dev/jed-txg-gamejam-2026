@@ -17,7 +17,9 @@ import { Puzzles } from './Puzzles.js';
 import { Cinematic } from './Cinematic.js';
 import { Weather } from './Weather.js';
 import { Endings } from './Endings.js';
-import { save as saveGame, load as loadGame, apply as applySave, clearSave, hasSave, recordEndingSeen } from './Save.js';
+import { save as saveGame, load as loadGame, apply as applySave, clearSave, hasSave, recordEndingSeen, endingsSeen } from './Save.js';
+import { AudioEngine } from './AudioEngine.js';
+import { SettingsStore } from './Settings.js';
 
 export class Game {
   constructor(container, callbacks = {}) {
@@ -160,12 +162,52 @@ export class Game {
     this.scene.add(this.weather.points);
     this.endings = new Endings(this);
 
+    // ==== Phase 4 systems ====
+    this.audio = new AudioEngine();
+    // NOTE: AudioContext is only created on the first user gesture; init() is
+    // deferred until GameApp calls game.initAudio() from a click handler.
+    this.settings = new SettingsStore(this);
+
     this.puzzles = new Puzzles(this);
     this.puzzles.setup(this._standingStones);
+
+    // Apply persisted settings once camCtrl exists (some values need the camera)
+    this.settings.applyAll();
 
     // Autosave book-keeping
     this._autosaveTimer = 0;
     this._hasSaveOnBoot = hasSave();
+
+    // Menu mode: game runs but is not player-driven; used behind the main menu.
+    this._menuMode = true;
+    this._menuT = 0;
+    this._menuAnchor = new THREE.Vector3(0, 3, 30);
+
+    // Pause state
+    this._paused = false;
+
+    // FPS auto-degrade watcher
+    this._lowFpsAccum = 0;
+    this._degraded = false;
+
+    // Ambience: react to area / weather / stream / health
+    this._prevAreaName = null;
+    if (this.gameState) {
+      this.gameState.on('flag', ({ key, value }) => {
+        if (key === 'restore_done' && value) {
+          this.audio && this.audio.setStreamFlowing(true);
+        }
+        if (key === 'stones_awoken' && value) {
+          this.audio && this.audio.setMusicMode('grove');
+        }
+      });
+      this.gameState.on('health', ({ health }) => {
+        this.audio && this.audio.setHealthNorm(health / 100);
+      });
+      this.gameState.on('choice_resolved', ({ kind }) => {
+        this.audio && this.audio.setMusicMode('ending_' + kind);
+      });
+    }
 
     // Notify GameApp when things change
     if (this.callbacks.onGameStateChange) {
@@ -208,7 +250,7 @@ export class Game {
     }
 
     // Notify shell about save presence so it can offer Continue.
-    if (this.callbacks.onSaveState) this.callbacks.onSaveState({ hasSave: this._hasSaveOnBoot });
+    if (this.callbacks.onSaveState) this.callbacks.onSaveState({ hasSave: this._hasSaveOnBoot, endingsSeen: endingsSeen() });
 
     this._reportProgress(1.0, 'Ready');
     if (this.callbacks.onLoaded) this.callbacks.onLoaded();
@@ -294,8 +336,124 @@ export class Game {
   isPointerLocked() { return this.input.pointerLocked; }
 
   // ================================================================
-  // Phase 3 public API
+  // Phase 3/4 public API
   // ================================================================
+
+  // Called from the first user gesture in the UI. Also enables audio.
+  initAudio() {
+    if (this.audio && !this.audio.isInitialized()) {
+      this.audio.init();
+      // Push current settings and area
+      if (this.settings) this.settings.applyAll();
+      if (this._prevAreaName) this.audio.setArea(this._prevAreaName);
+      else this.audio.setArea('The Entrance');
+      this.audio.setMusicMode('exploration');
+      if (this.gameState) this.audio.setHealthNorm(this.gameState.health / 100);
+      if (this.weather) this.audio.setWeather(this.weather.getStage());
+    }
+  }
+
+  // Menu-mode helpers
+  enterMenuMode() {
+    this._menuMode = true;
+    this._menuT = 0;
+    // Face the character toward camera-ish
+    if (this.character) this.character.facingY = Math.PI * 0.15;
+  }
+  exitMenuMode() {
+    this._menuMode = false;
+    if (this.camCtrl && this.character) {
+      // Snap smoothed camera state to current so the transition is not jerky
+      this.camCtrl._smoothedTarget.copy(this.character.root.position).y += 1.55;
+      this.camCtrl._smoothedPos.copy(this.camera.position);
+      this.camCtrl.currentDistance = this.camera.position.distanceTo(this.camCtrl._smoothedTarget);
+    }
+    this._prevAreaName = null;
+  }
+
+  // Pause / resume
+  pause() {
+    if (this._paused) return;
+    this._paused = true;
+    if (this.audio) this.audio.suspend();
+    if (this.callbacks.onPauseChange) this.callbacks.onPauseChange(true);
+  }
+  resume() {
+    if (!this._paused) return;
+    this._paused = false;
+    this._lastT = performance.now();   // avoid dt spike
+    if (this.audio) this.audio.resume();
+    if (this.callbacks.onPauseChange) this.callbacks.onPauseChange(false);
+  }
+  isPaused() { return this._paused; }
+
+  // Respawn player at Area 1 spawn keeping state intact.
+  restartArea() {
+    if (!this.character) return;
+    const spawnX = 0, spawnZ = 22;
+    this.character.root.position.set(spawnX, sampleHeight(spawnX, spawnZ), spawnZ);
+    this.character.facingY = Math.PI;
+    this.character.model.rotation.y = Math.PI;
+    this.character.velocity.set(0, 0, 0);
+    if (this.camCtrl) {
+      this.camCtrl._smoothedTarget.copy(this.character.root.position).y += 1.55;
+      this.camCtrl._smoothedPos.copy(this.character.root.position).y += 1.55;
+      this.camCtrl._smoothedPos.z += 6;
+      this.camCtrl.currentDistance = 5.5;
+      this.camCtrl.yaw = Math.PI;
+      this.camCtrl.pitch = -0.18;
+    }
+  }
+
+  // Quality preset: apply pixel ratio + shadow map + particle scale.
+  applyQuality(preset) {
+    if (!this.renderer) return;
+    let pixelRatio = 1.5, shadow = 1024, particleScale = 1.0, shadows = true;
+    if (preset === 'low')    { pixelRatio = 1.0; shadow = 0;    particleScale = 0.35; shadows = false; }
+    if (preset === 'medium') { pixelRatio = 1.25; shadow = 512;  particleScale = 0.7;  shadows = true; }
+    if (preset === 'high')   { pixelRatio = 1.5; shadow = 1024; particleScale = 1.0;  shadows = true; }
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatio));
+    this.renderer.shadowMap.enabled = shadows;
+    if (this.sun) {
+      this.sun.castShadow = shadows;
+      if (shadows) {
+        this.sun.shadow.mapSize.width = shadow;
+        this.sun.shadow.mapSize.height = shadow;
+      }
+    }
+    // Particle draw counts — scale visible portion. We adjust point cloud draw range
+    // by messing with geometry drawRange (cheap, non-destructive).
+    const scaleDrawRange = (pts) => {
+      if (!pts || !pts.geometry) return;
+      const total = pts.geometry.attributes && pts.geometry.attributes.position
+        ? pts.geometry.attributes.position.count
+        : 0;
+      if (!pts.geometry.userData._origCount) pts.geometry.userData._origCount = total;
+      const orig = pts.geometry.userData._origCount;
+      pts.geometry.setDrawRange(0, Math.max(0, Math.floor(orig * particleScale)));
+    };
+    scaleDrawRange(this.leaves);
+    scaleDrawRange(this.fireflies);
+    scaleDrawRange(this.pollen);
+    if (this.weather && this.weather.points) scaleDrawRange(this.weather.points);
+    // Grass / bush instance density — visible count via InstancedMesh.count.
+    if (this.vegetation && this.vegetation.children) {
+      for (const c of this.vegetation.children) {
+        if (c.isInstancedMesh) {
+          if (!c.userData._origCount) c.userData._origCount = c.count;
+          const orig = c.userData._origCount;
+          // Grass and bush get scaled; trees/rocks stay stable so the world doesn't visibly pop.
+          const nm = (c.name || '').toLowerCase();
+          if (nm.includes('grass') || nm.includes('bush') || nm.includes('flower') || nm.includes('fern')) {
+            c.count = Math.max(1, Math.floor(orig * particleScale));
+          }
+        }
+      }
+    }
+  }
+
+  hasSave() { return hasSave(); }
+  endingsSeen() { return endingsSeen(); }
 
   // Plays the opening cinematic. Skippable immediately.
   playOpening() {
@@ -325,7 +483,11 @@ export class Game {
   _doAutosave() {
     if (!this.gameState || !this.character) return;
     try {
-      saveGame(this.gameState, this.character, this.weather ? this.weather.getStage() : 'clear');
+      const ok = saveGame(this.gameState, this.character, this.weather ? this.weather.getStage() : 'clear');
+      if (ok) {
+        if (this.audio) this.audio.play('autosave');
+        if (this.callbacks.onAutosave) this.callbacks.onAutosave();
+      }
     } catch (_) { /* ignore */ }
   }
 
@@ -348,6 +510,10 @@ export class Game {
       {
         t: 1.5, fn: () => {
           this.gameState.emit('choice_open', {});
+          if (this.audio) {
+            this.audio.play('choice_appear');
+            this.audio.setMusicMode('choice');
+          }
           try { document.exitPointerLock(); } catch (_) {}
         },
       },
@@ -413,6 +579,13 @@ export class Game {
     requestAnimationFrame(this._loop);
     if (this._contextLost) return;
 
+    // Paused: keep rendering the last frame; do not advance time.
+    if (this._paused) {
+      this._lastT = nowMs;
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+
     const now = nowMs / 1000;
     const last = this._lastT / 1000;
     let dt = now - last;
@@ -428,10 +601,28 @@ export class Game {
       this.weather.update(dt, now, this.character.root.position);
     }
     if (this.endings) this.endings.update(dt, now);
+    if (this.audio) this.audio.update(dt);
 
-    // While a cinematic is active, freeze character + camera and reroute
-    // the interaction key (E) to skip the cinematic.
-    if (cineActive) {
+    // MENU MODE — game runs, but player is not driving. Camera drifts slowly
+    // around the spawn area to make the main menu feel alive.
+    if (this._menuMode && !cineActive) {
+      this._menuT += dt;
+      const r = 18;
+      const yaw = this._menuT * 0.06;
+      this.camera.position.set(
+        this._menuAnchor.x + Math.cos(yaw) * r,
+        this._menuAnchor.y + 2 + Math.sin(this._menuT * 0.4) * 0.3,
+        this._menuAnchor.z + Math.sin(yaw) * r,
+      );
+      this.camera.lookAt(this.character.root.position.x, this.character.root.position.y + 1.4, this.character.root.position.z);
+      // Keep character idle-animating
+      if (this.character) {
+        this.character.velocity.set(0, 0, 0);
+        const p = this.character.root.position;
+        p.y = sampleHeight(p.x, p.z);
+        this.character.updateAnimation(dt, 0, true, this.character.facingY);
+      }
+    } else if (cineActive) {
       if (this.character) {
         this.character.velocity.set(0, 0, 0);
         // Keep the character grounded and idle-animated so they don't freeze mid-stride.
@@ -449,19 +640,45 @@ export class Game {
       // Input is naturally zero without lock (movement possible without lock too — that's fine).
       if (this.charCtrl) this.charCtrl.update(dt);
       if (this.camCtrl) this.camCtrl.update(dt);
+
+      // Footstep audio (only when in normal gameplay)
+      if (this.audio && this.charCtrl) {
+        this.audio.updateFootsteps(this.character, this.input.isSprint(), this.charCtrl.grounded, dt);
+        // Landing thump on ground-touch transition
+        if (this.charCtrl.grounded && !this.charCtrl.wasGrounded) {
+          this.audio.playLanding();
+        }
+      }
     }
 
-    // Phase 2 updates (skip interactables while a cinematic is playing)
+    // Phase 2 updates (skip interactables while a cinematic is playing or in menu mode)
     if (this.gameState) this.gameState.update(dt);
-    if (this.interactables && !cineActive) this.interactables.update(dt);
+    if (this.interactables && !cineActive && !this._menuMode) this.interactables.update(dt);
     if (this.wildlife) this.wildlife.update(dt, this.character.root.position, this.character.velocity);
     if (this.puzzles) this.puzzles.update(dt, now);
 
-    // Autosave — every 30 seconds. Skip during cinematic/choice/ending.
+    // Area change → visit + ambience crossfade
+    if (!this._menuMode && this.character) {
+      const p = this.character.root.position;
+      const areaName = currentAreaName(p.x, p.z);
+      if (areaName && areaName !== this._prevAreaName) {
+        this._prevAreaName = areaName;
+        if (this.audio) this.audio.setArea(areaName);
+        if (this.gameState) this.gameState.recordAreaVisit(areaName);
+        // Grove mystery music shift
+        if (this.audio) {
+          if (/Ancient Grove/.test(areaName)) this.audio.setMusicMode('grove');
+          else if (!/Ancient Grove|Heart/.test(areaName) && this.audio._musicMode === 'grove') this.audio.setMusicMode('exploration');
+        }
+      }
+    }
+
+    // Autosave — every 30 seconds. Skip during cinematic/choice/ending/menu.
     this._autosaveTimer += dt;
     if (this._autosaveTimer >= 30) {
       this._autosaveTimer = 0;
       const canSave = !cineActive
+        && !this._menuMode
         && !(this.endings && this.endings.active)
         && this.gameState
         && !this.gameState.endingResolved;
@@ -530,6 +747,18 @@ export class Game {
         z: p ? p.z : 0,
         area: p ? currentAreaName(p.x, p.z) : '',
       });
+      // FPS auto-degrade (only when not paused, not in menu). Uses this window's fps.
+      if (!this._menuMode && !this._paused) {
+        if (fps < 30) this._lowFpsAccum += 0.5;
+        else this._lowFpsAccum = Math.max(0, this._lowFpsAccum - 0.25);
+        if (!this._degraded && this._lowFpsAccum >= 5 && this.settings && this.settings.get('quality') !== 'low') {
+          this._degraded = true;
+          const cur = this.settings.get('quality');
+          const next = cur === 'high' ? 'medium' : 'low';
+          this.settings.set({ quality: next });
+          if (this.callbacks.onDegrade) this.callbacks.onDegrade({ preset: next });
+        }
+      }
       this._fpsSampleT = nowMs;
       this._frames = 0;
     }

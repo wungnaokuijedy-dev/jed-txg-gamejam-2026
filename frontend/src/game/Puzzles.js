@@ -57,6 +57,7 @@ export class Puzzles {
           gs.markDone(spec.id);
           gs.addSeed();
           scene.remove(pickup);
+          if (g.audio) g.audio.play('seed_pickup');
           // Remove nearby butterflies (any within 3m)
           const bfs = [...wildlife.butterflies];
           for (const b of bfs) {
@@ -105,6 +106,7 @@ export class Puzzles {
             this.vineGrowth = new VineGrowth(logStart, logEnd, { duration: 4.0 });
             scene.add(this.vineGrowth.group);
             this.effects.push(this.vineGrowth);
+            if (g.audio) g.audio.play('vine_growth');
             // Remove log collision so player can pass (approximate: shrink obstacle radii)
             const obs = g.obstacles;
             for (let i = obs.length - 1; i >= 0; i--) {
@@ -142,6 +144,7 @@ export class Puzzles {
       isAvailable: () => !gs.isDone('clear_spring'),
       onInteract: async () => {
         gs.markDone('clear_spring');
+        if (g.audio) g.audio.play('water_release');
         // Animate debris pile crumbling — scale down over 1s
         const start = performance.now();
         const dur = 1000;
@@ -187,6 +190,7 @@ export class Puzzles {
       onInteract: async () => {
         gs.markDone('free_bird');
         bird.freeBird();
+        if (g.audio) g.audio.play('bird_free');
         gs.setFlag('bird_freed', true);
         gs.addHealth(10, 'free_bird');
         // Set fly-away target toward Ancient Grove
@@ -224,6 +228,7 @@ export class Puzzles {
         gs.markDone('awaken_stones');
         if (this.stoneGlow) this.stoneGlow.activate();
         gs.setFlag('stones_awoken', true);
+        if (g.audio) g.audio.play('stone_hum');
         // Guardian revelation cinematic: slow push toward the giant grove tree.
         // Camera targets the CENTER of Area 4 (the giant tree lives there).
         if (g.cinematic) {
@@ -304,6 +309,7 @@ export class Puzzles {
       onInteract: async () => {
         gs.markDone('take_glowing');
         glowingFlowers.wither();
+        if (g.audio) g.audio.play('temptation');
         gs.addHealth(-10, 'take_glowing');
       },
     });
@@ -320,6 +326,7 @@ export class Puzzles {
       onInteract: async () => {
         gs.markDone('take_mushrooms');
         mushroomRing.wither();
+        if (g.audio) g.audio.play('temptation');
         gs.addHealth(-10, 'take_mushrooms');
       },
     });
@@ -416,6 +423,7 @@ export class Puzzles {
         this.heartGate.open();
         this._gateOpened = true;
         gs.setObjective('…');
+        if (this.game.audio) this.game.audio.play('gate_open');
         // Slight letterbox effect via GameState event
         gs.emit('letterbox', { on: true });
         setTimeout(() => gs.emit('letterbox', { on: false }), 3500);

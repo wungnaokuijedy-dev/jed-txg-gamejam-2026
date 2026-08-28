@@ -585,3 +585,452 @@ html, body, #root {
   line-height: 1.5;
   text-shadow: 0 2px 20px rgba(0,0,0,0.65);
 }
+
+/* =====================================================================
+ * Phase 4 — Main Menu, Pause Menu, Screens (Settings/Controls/Credits/Map)
+ * ===================================================================== */
+
+/* Menu title block on the main menu */
+.wnl-main-menu {
+  gap: 3.2rem;
+  background:
+    radial-gradient(ellipse at 50% 40%,
+      rgba(30,55,55,0.28) 0%,
+      rgba(10,20,20,0.7) 65%,
+      rgba(5,10,10,0.9) 100%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.wnl-menu-title-block {
+  display: flex; flex-direction: column; align-items: center; gap: 1.2rem;
+}
+.wnl-menu-tagline {
+  margin: 0;
+  color: rgba(230, 240, 220, 0.72);
+  font-style: italic;
+  font-size: clamp(0.95rem, 1.5vw, 1.2rem);
+  letter-spacing: 0.18em;
+  text-align: center;
+  max-width: 42ch;
+  text-shadow: 0 1px 12px rgba(0,0,0,0.55);
+  animation: wnl-fade-in 1600ms ease-out both;
+}
+.wnl-menu-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.7rem;
+  min-width: 240px;
+}
+.wnl-menu-btn {
+  position: relative;
+  padding: 0.75rem 1.6rem;
+  font-family: inherit;
+  font-size: 1.15rem;
+  font-style: italic;
+  letter-spacing: 0.24em;
+  color: #ecf3ec;
+  background: rgba(12, 22, 22, 0.42);
+  border: 1px solid rgba(200, 220, 210, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 260ms ease, border-color 260ms ease,
+              color 260ms ease, transform 240ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.wnl-menu-btn:hover,
+.wnl-menu-btn:focus-visible {
+  background: rgba(220, 235, 220, 0.14);
+  border-color: rgba(240, 250, 235, 0.9);
+  color: #ffffff;
+  transform: translateY(-2px);
+  outline: none;
+}
+.wnl-menu-btn-label { display: inline-block; }
+
+/* Ending glyphs at bottom of main menu */
+.wnl-endings-row {
+  position: absolute;
+  bottom: 3.5vh;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  gap: 0.7rem;
+  opacity: 0.85;
+}
+
+/* Pause menu */
+.wnl-pause-menu {
+  background:
+    radial-gradient(ellipse at 50% 50%,
+      rgba(10, 22, 22, 0.55) 0%,
+      rgba(5, 10, 10, 0.85) 60%,
+      rgba(0, 0, 0, 0.92) 100%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.wnl-pause-panel {
+  display: flex; flex-direction: column; align-items: center; gap: 1.1rem;
+  padding: 1.8rem 2.4rem;
+  border: 1px solid rgba(200, 220, 210, 0.22);
+  border-radius: 14px;
+  background: rgba(15, 28, 28, 0.62);
+  box-shadow: 0 30px 60px rgba(0,0,0,0.45);
+  min-width: 320px;
+}
+.wnl-pause-heading {
+  font-size: 1.6rem;
+  font-style: italic;
+  letter-spacing: 0.22em;
+  color: #ecf3ec;
+}
+.wnl-pause-hint {
+  margin: 0;
+  color: rgba(210, 225, 220, 0.7);
+  font-style: italic;
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+.wnl-pause-buttons {
+  min-width: 260px;
+}
+
+/* Generic full-screen screen with scrollable inner */
+.wnl-screen {
+  background:
+    radial-gradient(ellipse at 50% 40%,
+      rgba(20, 32, 28, 0.72) 0%,
+      rgba(5, 10, 10, 0.9) 60%,
+      rgba(0, 0, 0, 0.95) 100%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  overflow-y: auto;
+}
+.wnl-screen-inner {
+  display: flex; flex-direction: column; gap: 0.55rem;
+  width: min(680px, 92vw);
+  max-height: 88vh;
+  padding: 1.5rem 1rem 0.5rem;
+}
+.wnl-screen-title {
+  font-size: clamp(1.5rem, 2.4vw, 2.1rem);
+  font-style: italic;
+  letter-spacing: 0.26em;
+  color: #ecf3ec;
+  text-align: center;
+  margin-bottom: 0.8rem;
+}
+.wnl-section-title {
+  margin-top: 1.1rem;
+  color: rgba(200, 220, 200, 0.78);
+  font-style: italic;
+  font-size: 1rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(200, 220, 200, 0.16);
+  padding-bottom: 0.35rem;
+}
+.wnl-screen-footer {
+  display: flex; justify-content: center;
+  margin-top: 1.4rem; padding-bottom: 1rem;
+}
+
+/* Settings row layout */
+.wnl-setting-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.35rem 0.2rem;
+}
+.wnl-setting-label {
+  color: rgba(230, 240, 220, 0.85);
+  font-size: 1rem;
+  font-style: italic;
+  letter-spacing: 0.06em;
+}
+.wnl-setting-control {
+  display: flex; align-items: center; gap: 0.6rem;
+}
+.wnl-setting-control input[type="range"] {
+  flex: 1;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(90deg, rgba(150,190,160,0.6), rgba(220,235,220,0.35));
+  border-radius: 2px;
+  outline: none;
+}
+.wnl-setting-control input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 999px;
+  background: #dfeadf;
+  border: 1px solid rgba(90,110,90,0.5);
+  cursor: pointer;
+  transition: transform 200ms ease;
+}
+.wnl-setting-control input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+.wnl-setting-control input[type="range"]::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: 999px;
+  background: #dfeadf;
+  border: 1px solid rgba(90,110,90,0.5);
+  cursor: pointer;
+}
+.wnl-setting-value {
+  min-width: 3.2rem;
+  text-align: right;
+  color: rgba(220, 235, 225, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+/* Toggle */
+.wnl-toggle {
+  display: inline-flex; align-items: center; gap: 0.6rem;
+  padding: 0.35rem 0.8rem;
+  background: rgba(15, 22, 22, 0.55);
+  border: 1px solid rgba(200,220,210,0.3);
+  border-radius: 999px;
+  color: rgba(230, 240, 225, 0.8);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-style: italic;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+.wnl-toggle:hover { border-color: rgba(240,250,235,0.7); }
+.wnl-toggle-dot {
+  width: 12px; height: 12px;
+  border-radius: 999px;
+  background: rgba(220, 235, 225, 0.35);
+  border: 1px solid rgba(200,220,210,0.45);
+  transition: background-color 220ms ease, box-shadow 220ms ease;
+}
+.wnl-toggle.is-on .wnl-toggle-dot {
+  background: #98c48a;
+  box-shadow: 0 0 8px rgba(150,220,150,0.6);
+  border-color: rgba(150,200,150,0.9);
+}
+.wnl-toggle.is-on { color: #ecf3ec; }
+
+/* Segmented */
+.wnl-seg { gap: 0; }
+.wnl-seg-btn {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid rgba(200,220,210,0.3);
+  background: rgba(15, 22, 22, 0.5);
+  color: rgba(220, 235, 220, 0.75);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-style: italic;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease;
+}
+.wnl-seg-btn:first-child { border-radius: 999px 0 0 999px; }
+.wnl-seg-btn:last-child  { border-radius: 0 999px 999px 0; }
+.wnl-seg-btn:not(:first-child) { border-left-width: 0; }
+.wnl-seg-btn:hover { color: #ecf3ec; }
+.wnl-seg-btn.is-active {
+  background: rgba(150, 200, 150, 0.22);
+  color: #ffffff;
+  border-color: rgba(180, 220, 180, 0.7);
+}
+
+/* Controls list */
+.wnl-controls-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.4rem;
+  padding: 0.5rem 0.2rem;
+}
+.wnl-controls-row {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed rgba(200, 220, 200, 0.14);
+}
+.wnl-controls-row:last-child { border-bottom: none; }
+.wnl-controls-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.wnl-controls-key kbd {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(200,220,210,0.08);
+  border: 1px solid rgba(200,220,210,0.28);
+  color: #dbeadb;
+  font-size: 0.85rem;
+  margin-right: 4px;
+}
+.wnl-controls-action {
+  color: rgba(230,240,225,0.85);
+  font-style: italic;
+  letter-spacing: 0.08em;
+}
+
+/* Credits */
+.wnl-credits {
+  display: grid; gap: 1.1rem;
+  padding: 0.6rem 0.2rem;
+}
+.wnl-credits-block { text-align: center; }
+.wnl-credits-role {
+  color: rgba(200, 220, 200, 0.65);
+  font-style: italic;
+  font-size: 0.9rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.wnl-credits-name {
+  color: #ecf3ec;
+  font-size: 1.05rem;
+  font-style: italic;
+  letter-spacing: 0.1em;
+  margin-top: 0.15rem;
+}
+.wnl-credits-jam .wnl-credits-name {
+  color: #f2e0a0;
+}
+
+/* Map screen (journal) */
+.wnl-map {
+  background: radial-gradient(ellipse at 50% 50%,
+    rgba(15, 22, 20, 0.4) 0%,
+    rgba(5, 10, 8, 0.85) 65%,
+    rgba(0, 0, 0, 0.95) 100%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  gap: 1.2rem;
+}
+.wnl-map-book {
+  width: min(1080px, 94vw);
+  aspect-ratio: 3 / 2;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow:
+    0 30px 60px rgba(0,0,0,0.6),
+    inset 0 0 60px rgba(30,20,10,0.4);
+  transform: perspective(1400px) rotateX(1deg);
+  animation: wnl-book-in 500ms ease-out both;
+}
+@keyframes wnl-book-in {
+  from { opacity: 0; transform: perspective(1400px) rotateX(6deg) translateY(20px); }
+  to   { opacity: 1; transform: perspective(1400px) rotateX(1deg) translateY(0); }
+}
+.wnl-map-canvas {
+  width: 100%; height: 100%; display: block;
+}
+.wnl-map-footer {
+  display: flex; gap: 1rem; align-items: center;
+}
+.wnl-map-hint {
+  color: rgba(220, 235, 225, 0.6);
+  font-style: italic;
+  font-size: 0.9rem;
+  letter-spacing: 0.14em;
+}
+
+/* Confirm overwrite */
+.wnl-confirm {
+  background:
+    radial-gradient(ellipse at 50% 50%,
+      rgba(10, 22, 22, 0.7) 0%,
+      rgba(5, 10, 10, 0.9) 60%,
+      rgba(0, 0, 0, 0.95) 100%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Autosave leaf tick — top right */
+.wnl-autosave-tick {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  z-index: 8;
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: rgba(200, 235, 200, 0.85);
+  background: rgba(15, 25, 22, 0.55);
+  border: 1px solid rgba(180, 220, 180, 0.3);
+  font-style: italic;
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  pointer-events: none;
+  animation: wnl-autosave-in 400ms ease-out both, wnl-autosave-out 500ms ease-in 900ms forwards;
+}
+@keyframes wnl-autosave-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes wnl-autosave-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Auto-degrade notice */
+.wnl-degrade-notice {
+  position: absolute;
+  bottom: 8vh;
+  right: 20px;
+  z-index: 8;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(15, 25, 22, 0.72);
+  border: 1px solid rgba(180, 220, 180, 0.3);
+  color: rgba(230, 240, 220, 0.85);
+  font-style: italic;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  pointer-events: none;
+  animation: wnl-autosave-in 400ms ease-out both;
+}
+.wnl-degrade-notice b { color: #b8dcb0; font-weight: 500; }
+
+/* Interaction-hints-off — replace prompt text with a small dot */
+.wnl-hud-prompt-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: rgba(240, 245, 230, 0.8);
+  box-shadow: 0 0 8px rgba(180, 220, 180, 0.75);
+}
+
+/* Text size scaling (accessibility) — root class controls HUD/subtitle scale */
+.wnl-text-s .wnl-hud-objective,
+.wnl-text-s .wnl-subtitle,
+.wnl-text-s .wnl-hud-prompt { font-size: 0.9rem; }
+.wnl-text-m .wnl-hud-objective { font-size: clamp(1rem, 1.5vw, 1.2rem); }
+.wnl-text-m .wnl-subtitle { font-size: clamp(1.1rem, 1.9vw, 1.55rem); }
+.wnl-text-l .wnl-hud-objective,
+.wnl-text-l .wnl-subtitle { font-size: clamp(1.3rem, 2.4vw, 1.95rem); }
+.wnl-text-l .wnl-hud-prompt  { font-size: 1.35rem; }
+
+/* High contrast — stronger backplates + heavier shadows on all text HUD */
+.wnl-high-contrast .wnl-hud-objective,
+.wnl-high-contrast .wnl-subtitle {
+  background: rgba(0,0,0,0.55);
+  padding: 4px 12px;
+  border-radius: 6px;
+  text-shadow: 0 2px 12px rgba(0,0,0,1), 0 1px 0 #000;
+}
+.wnl-high-contrast .wnl-hud-prompt {
+  background: rgba(0,0,0,0.62);
+  border-color: rgba(240,250,240,0.85);
+}
+
+/* Small mobile: allow menu buttons to shrink */
+@media (max-width: 640px) {
+  .wnl-menu-buttons { min-width: 68vw; }
+  .wnl-setting-row { grid-template-columns: 130px 1fr; }
+  .wnl-controls-row { grid-template-columns: 140px 1fr; }
+}
+

@@ -133,7 +133,7 @@ yarn start              # opens http://localhost:3000 with hot reload
 
 ## Credits
 
-- Game by **Wungnaokui Awungshi** — Solo Developer — [@princejedd](https://itch.io/profile/princejedd)
+- Game by **Wungnaokui Awungshi** — Solo Developer — [@princejedd](https://www.indieconnect.in/@princejedd)
 - Development assistance & code generation: **Emergent AI (Claude)** *(disclosed in the AI disclosure section above per jam rules)*
 - Engine: **Three.js** (MIT) and **React** (MIT)
 - Art, animation, audio: **100% procedural — no third-party assets**

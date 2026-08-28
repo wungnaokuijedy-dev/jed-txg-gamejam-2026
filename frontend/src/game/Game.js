@@ -242,6 +242,9 @@ export class Game {
       this.gameState.on('ending', (payload) => {
         if (this.callbacks.onEnding) this.callbacks.onEnding(payload);
       });
+      this.gameState.on('silence_mood', ({ on }) => {
+        if (this.callbacks.onSilenceMood) this.callbacks.onSilenceMood(!!on);
+      });
       // Autosave on major story beats
       this.gameState.on('flag', () => this.saveNow());
       this.gameState.on('seeds', () => this.saveNow());
@@ -640,6 +643,17 @@ export class Game {
       // Input is naturally zero without lock (movement possible without lock too — that's fine).
       if (this.charCtrl) this.charCtrl.update(dt);
       if (this.camCtrl) this.camCtrl.update(dt);
+
+      // Stuck-player safety: if the character somehow leaves the terrain footprint
+      // (falls under, or wanders past the invisible bounds) respawn softly at Area 1.
+      if (this.character) {
+        const p = this.character.root.position;
+        const outOfBounds = (p.x < -80 || p.x > 80 || p.z < -95 || p.z > 55);
+        const belowTerrain = p.y < sampleHeight(p.x, p.z) - 6;
+        if (outOfBounds || belowTerrain) {
+          this.restartArea();
+        }
+      }
 
       // Footstep audio (only when in normal gameplay)
       if (this.audio && this.charCtrl) {

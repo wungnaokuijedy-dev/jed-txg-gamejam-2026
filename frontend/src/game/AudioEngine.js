@@ -498,17 +498,37 @@ export class AudioEngine {
   _playFoot(sprinting) {
     const ctx = this.ctx;
     const t = ctx.currentTime;
+    // Per-area footstep character. Values chosen for a clear qualitative shift.
+    //   Entrance:     crisp leaf crunch — higher bandpass, higher Q
+    //   Whispering:   default soft grass
+    //   Silent Stream:damp/wet — lowpass, softer amplitude
+    //   Grove/Heart:  resonant wood — mid bandpass, longer decay
+    let fType = 'bandpass';
+    let fFreq = 260 + Math.random() * 80;
+    let fQ = 2.2;
+    let peak = sprinting ? 0.28 : 0.16;
+    let dur = sprinting ? 0.14 : 0.20;
+    const name = this._areaName || '';
+    if (/Entrance/.test(name)) {
+      fType = 'bandpass'; fFreq = 900 + Math.random() * 400; fQ = 5;
+      peak = sprinting ? 0.24 : 0.14; dur = sprinting ? 0.12 : 0.17;
+    } else if (/Silent Stream/.test(name)) {
+      fType = 'lowpass'; fFreq = 220 + Math.random() * 60; fQ = 1.0;
+      peak = sprinting ? 0.22 : 0.13; dur = sprinting ? 0.18 : 0.24;
+    } else if (/Ancient Grove|Heart/.test(name)) {
+      fType = 'bandpass'; fFreq = 360 + Math.random() * 100; fQ = 3.5;
+      peak = sprinting ? 0.30 : 0.18; dur = sprinting ? 0.20 : 0.28;
+    }
     const src = ctx.createBufferSource();
     src.buffer = this.whiteBuf;
     const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 260 + Math.random() * 80;
-    filter.Q.value = 2.2;
+    filter.type = fType;
+    filter.frequency.value = fFreq;
+    filter.Q.value = fQ;
     const g = ctx.createGain();
-    const peak = sprinting ? 0.28 : 0.16;
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(peak, t + 0.005);
-    g.gain.exponentialRampToValueAtTime(0.001, t + (sprinting ? 0.14 : 0.20));
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     src.connect(filter); filter.connect(g); g.connect(this.ambientGain);
     src.start(t);
     src.stop(t + 0.35);

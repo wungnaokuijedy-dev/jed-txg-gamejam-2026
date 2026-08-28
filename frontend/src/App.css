@@ -650,14 +650,23 @@ html, body, #root {
 .wnl-menu-btn-label { display: inline-block; }
 
 /* Ending glyphs at bottom of main menu */
-.wnl-endings-row {
+.wnl-endings-block {
   position: absolute;
   bottom: 3.5vh;
   left: 50%;
   transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+}
+.wnl-endings-row {
   display: inline-flex;
   gap: 0.7rem;
   opacity: 0.85;
+}
+.wnl-endings-count {
+  color: rgba(200, 220, 200, 0.6);
+  font-style: italic;
+  font-size: 0.82rem;
+  letter-spacing: 0.24em;
 }
 
 /* Pause menu */
@@ -1032,5 +1041,20 @@ html, body, #root {
   .wnl-menu-buttons { min-width: 68vw; }
   .wnl-setting-row { grid-template-columns: 130px 1fr; }
   .wnl-controls-row { grid-template-columns: 140px 1fr; }
+}
+
+
+/* Silence-ending mood — subtle desaturation + heavier vignette on the canvas.
+   Applied to the document root via `wnl-silence-mood` class from GameApp. */
+.wnl-silence-mood .wnl-canvas-container {
+  filter: saturate(0.55) contrast(0.96) brightness(0.92);
+  transition: filter 3200ms ease;
+}
+.wnl-silence-mood .wnl-vignette {
+  background: radial-gradient(ellipse at 50% 50%,
+    rgba(0,0,0,0) 25%,
+    rgba(0,0,0,0.35) 65%,
+    rgba(0,0,0,0.75) 100%);
+  transition: background 3200ms ease;
 }
 

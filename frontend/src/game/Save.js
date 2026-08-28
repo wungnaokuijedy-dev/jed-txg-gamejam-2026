@@ -88,8 +88,14 @@ export function recordEndingSeen(kind) {
 export function endingsSeen() {
   try {
     const raw = localStorage.getItem(KEY_ENDINGS);
-    return raw ? JSON.parse(raw) : {};
-  } catch (_) { return {}; }
+    const parsed = raw ? JSON.parse(raw) : {};
+    // Guard against corrupt data (arrays / non-objects)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch (_) {
+    try { localStorage.removeItem(KEY_ENDINGS); } catch (__) {}
+    return {};
+  }
 }
 
 export function hasSave() {

@@ -213,6 +213,8 @@ export class Endings {
     this.active = 'silence';
     g.weather.setStage('mist');
     g.gameState._moodTTarget = 0.0;   // full cool grey
+    // Notify shell so the canvas gets a subtle desaturation + heavier vignette
+    if (g.gameState) g.gameState.emit('silence_mood', { on: true });
     // Fireflies gutter out — do this on the existing firefly group by fading its material
     const ff = g.fireflies;
     let t = 0;

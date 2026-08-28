@@ -6,6 +6,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { renderMap } from '../../game/Map.js';
 
+// Single point-of-truth for the creator name shown on the Credits screen.
+// The client provides the entrant name — swap this constant to update.
+export const CREATOR_NAME = 'Wungnaokui Awungshi';
+
 // -------------------------------------------------------
 // Endings row on the main menu (fill / hollow leaf glyphs)
 // -------------------------------------------------------
@@ -25,11 +29,17 @@ function LeafGlyph({ filled }) {
 
 export function EndingsRow({ endingsSeen }) {
   const kinds = ['guardian', 'balance', 'silence'];
+  const seenCount = kinds.reduce((n, k) => n + (endingsSeen && endingsSeen[k] ? 1 : 0), 0);
   return (
-    <div className="wnl-endings-row" data-testid="endings-row" aria-hidden>
-      {kinds.map((k) => (
-        <LeafGlyph key={k} filled={!!(endingsSeen && endingsSeen[k])} />
-      ))}
+    <div className="wnl-endings-block" data-testid="endings-block">
+      <div className="wnl-endings-row" data-testid="endings-row" aria-hidden>
+        {kinds.map((k) => (
+          <LeafGlyph key={k} filled={!!(endingsSeen && endingsSeen[k])} />
+        ))}
+      </div>
+      <div className="wnl-endings-count" data-testid="endings-count" aria-live="polite">
+        Endings discovered: {seenCount} / 3
+      </div>
     </div>
   );
 }
@@ -261,11 +271,7 @@ export function CreditsScreen({ onBack }) {
         <div className="wnl-credits">
           <div className="wnl-credits-block">
             <div className="wnl-credits-role">Game by</div>
-            <div className="wnl-credits-name">— your name here —</div>
-          </div>
-          <div className="wnl-credits-block">
-            <div className="wnl-credits-role">Built with</div>
-            <div className="wnl-credits-name">Emergent AI (Claude) assistance</div>
+            <div className="wnl-credits-name" data-testid="credits-creator">{CREATOR_NAME}</div>
           </div>
           <div className="wnl-credits-block">
             <div className="wnl-credits-role">Engine</div>

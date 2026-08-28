@@ -232,108 +232,21 @@ export function isAreaVisited(area, visitedSet) {
   return visitedSet.has(area.id);
 }
 
-export function renderMap(canvas, opts) {
-  const ctx = canvas.getContext('2d');
-  if (canvas.width !== CAN_W) { canvas.width = CAN_W; canvas.height = CAN_H; }
-  drawParchment(ctx);
+// Offscreen static-layer cache. Everything except the moving player marker
+// gets drawn once per (flags, visited) combination — much cheaper on redraw.
+let _staticCache = null;   // { hash, canvas }
+function staticHash(flags, visited) {
+  const vk = Array.from(visited).sort().join(',');
+  const fk = [
+    flags.grow_done ? 1 : 0,
+    flags.restore_done ? 1 : 0,
+    flags.stones_awoken ? 1 : 0,
+    flags.heart_reached ? 1 : 0,
+  ].join('');
+  return `v:${vk}|f:${fk}`;
+}
 
-  // Title (handwritten-style italic)
-  ctx.save();
-  ctx.fillStyle = '#3a2410';
-  ctx.font = 'italic 32px "Cormorant Garamond", "Iowan Old Style", serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('The Explorer\'s Journal', CAN_W / 2, 62);
-  ctx.font = 'italic 15px "Cormorant Garamond", serif';
-  ctx.fillStyle = 'rgba(80,50,25,0.75)';
-  ctx.fillText('Where nature leads', CAN_W / 2, 84);
-  ctx.restore();
-
-  const flags = opts.flags || {};
-  const visited = opts.visited || new Set();
-
-  // Stream first (below regions)
-  if (visited.has(3) || flags.restore_done) {
-    drawStream(ctx, !!flags.restore_done);
-  }
-
-  // Area colors when discovered vs faint
-  const styles = [
-    { fill: 'rgba(150,180,120,0.55)', stroke: 'rgba(60,80,40,0.85)' },
-    { fill: 'rgba(100,140,90,0.55)',  stroke: 'rgba(30,60,20,0.9)' },
-    { fill: 'rgba(120,150,140,0.55)', stroke: 'rgba(30,60,60,0.9)' },
-    { fill: 'rgba(160,150,170,0.55)', stroke: 'rgba(60,40,90,0.9)' },
-    { fill: 'rgba(200,170,110,0.55)', stroke: 'rgba(120,80,20,0.9)' },
-  ];
-
-  for (let i = 0; i < AREAS.length; i++) {
-    const a = AREAS[i];
-    const [cx, cy] = worldToCanvas(a.center[0], a.center[1]);
-    if (!visited.has(a.id)) {
-      drawUnknownArea(ctx, cx, cy);
-      continue;
-    }
-    const s = styles[i] || styles[0];
-    // Region blob
-    inkyBlob(ctx, cx, cy, 68, 46, i * 1.7, s.fill, s.stroke);
-
-    // Area-specific illustrated glyphs
-    if (i === 0) {
-      // Entrance — a few tall trees
-      drawTree(ctx, cx - 22, cy + 6, 1.3, 1);
-      drawTree(ctx, cx + 20, cy - 6, 1.4, 2);
-      drawTree(ctx, cx + 4, cy + 14, 1.0, 3);
-    } else if (i === 1) {
-      // Whispering Woods — dense trees + bridge
-      drawTree(ctx, cx - 24, cy - 6, 1.1, 4);
-      drawTree(ctx, cx - 8, cy + 6, 1.0, 5);
-      drawTree(ctx, cx + 20, cy + 4, 1.2, 6);
-      drawTree(ctx, cx + 8, cy - 8, 0.9, 7);
-      drawBridge(ctx, cx - 4, cy + 20, !!flags.grow_done);
-    } else if (i === 2) {
-      // Silent Stream — a few ferns + fish flourish if flowing
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.strokeStyle = 'rgba(60,80,50,0.9)';
-      ctx.lineWidth = 1.2;
-      for (let k = -2; k <= 2; k++) {
-        ctx.beginPath();
-        ctx.moveTo(k * 16, 12);
-        ctx.quadraticCurveTo(k * 16 + 3, 3, k * 16 + 1, -6);
-        ctx.stroke();
-      }
-      ctx.restore();
-    } else if (i === 3) {
-      // Ancient Grove — stones + one big tree
-      drawTree(ctx, cx - 14, cy - 8, 1.6, 8);
-      drawStones(ctx, cx + 12, cy + 4, !!flags.stones_awoken);
-    } else if (i === 4) {
-      // Heart — one massive tree glyph
-      drawTree(ctx, cx, cy - 4, 2.2, 9);
-      if (flags.heart_reached) drawFlourish(ctx, cx, cy + 20);
-    }
-
-    // Area label (handwritten italic)
-    ctx.save();
-    ctx.fillStyle = '#2a1a10';
-    ctx.font = 'italic 15px "Cormorant Garamond", serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText(a.name, cx, cy + 34);
-    ctx.restore();
-
-    // Completion flourish overlay when a restore happened here
-    if (i === 1 && flags.grow_done) drawFlourish(ctx, cx + 34, cy - 22);
-    if (i === 2 && flags.restore_done) drawFlourish(ctx, cx - 34, cy - 22);
-    if (i === 3 && flags.stones_awoken) drawFlourish(ctx, cx - 34, cy + 22);
-  }
-
-  // Player marker
-  if (opts.player) {
-    const [px, py] = worldToCanvas(opts.player.x, opts.player.z);
-    drawHeroineMarker(ctx, px, py, opts.player.facingY || 0);
-  }
-
-  // Compass rose N indicator
+function drawCompassRose(ctx) {
   ctx.save();
   ctx.translate(CAN_W - 80, CAN_H - 80);
   ctx.strokeStyle = 'rgba(80,50,25,0.8)';
@@ -350,3 +263,101 @@ export function renderMap(canvas, opts) {
   ctx.fillText('N', 0, -32);
   ctx.restore();
 }
+
+// Renders the entire static layer (title, parchment, regions, glyphs, compass).
+function drawStaticLayer(ctx, flags, visited) {
+  drawParchment(ctx);
+  ctx.save();
+  ctx.fillStyle = '#3a2410';
+  ctx.font = 'italic 32px "Cormorant Garamond", "Iowan Old Style", serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('The Explorer\'s Journal', CAN_W / 2, 62);
+  ctx.font = 'italic 15px "Cormorant Garamond", serif';
+  ctx.fillStyle = 'rgba(80,50,25,0.75)';
+  ctx.fillText('Where nature leads', CAN_W / 2, 84);
+  ctx.restore();
+
+  if (visited.has(3) || flags.restore_done) drawStream(ctx, !!flags.restore_done);
+
+  const styles = [
+    { fill: 'rgba(150,180,120,0.55)', stroke: 'rgba(60,80,40,0.85)' },
+    { fill: 'rgba(100,140,90,0.55)',  stroke: 'rgba(30,60,20,0.9)' },
+    { fill: 'rgba(120,150,140,0.55)', stroke: 'rgba(30,60,60,0.9)' },
+    { fill: 'rgba(160,150,170,0.55)', stroke: 'rgba(60,40,90,0.9)' },
+    { fill: 'rgba(200,170,110,0.55)', stroke: 'rgba(120,80,20,0.9)' },
+  ];
+
+  for (let i = 0; i < AREAS.length; i++) {
+    const a = AREAS[i];
+    const [cx, cy] = worldToCanvas(a.center[0], a.center[1]);
+    if (!visited.has(a.id)) { drawUnknownArea(ctx, cx, cy); continue; }
+    const s = styles[i] || styles[0];
+    inkyBlob(ctx, cx, cy, 68, 46, i * 1.7, s.fill, s.stroke);
+
+    if (i === 0) {
+      drawTree(ctx, cx - 22, cy + 6, 1.3, 1);
+      drawTree(ctx, cx + 20, cy - 6, 1.4, 2);
+      drawTree(ctx, cx + 4, cy + 14, 1.0, 3);
+    } else if (i === 1) {
+      drawTree(ctx, cx - 24, cy - 6, 1.1, 4);
+      drawTree(ctx, cx - 8, cy + 6, 1.0, 5);
+      drawTree(ctx, cx + 20, cy + 4, 1.2, 6);
+      drawTree(ctx, cx + 8, cy - 8, 0.9, 7);
+      drawBridge(ctx, cx - 4, cy + 20, !!flags.grow_done);
+    } else if (i === 2) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.strokeStyle = 'rgba(60,80,50,0.9)';
+      ctx.lineWidth = 1.2;
+      for (let k = -2; k <= 2; k++) {
+        ctx.beginPath();
+        ctx.moveTo(k * 16, 12);
+        ctx.quadraticCurveTo(k * 16 + 3, 3, k * 16 + 1, -6);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else if (i === 3) {
+      drawTree(ctx, cx - 14, cy - 8, 1.6, 8);
+      drawStones(ctx, cx + 12, cy + 4, !!flags.stones_awoken);
+    } else if (i === 4) {
+      drawTree(ctx, cx, cy - 4, 2.2, 9);
+      if (flags.heart_reached) drawFlourish(ctx, cx, cy + 20);
+    }
+
+    ctx.save();
+    ctx.fillStyle = '#2a1a10';
+    ctx.font = 'italic 15px "Cormorant Garamond", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(a.name, cx, cy + 34);
+    ctx.restore();
+
+    if (i === 1 && flags.grow_done) drawFlourish(ctx, cx + 34, cy - 22);
+    if (i === 2 && flags.restore_done) drawFlourish(ctx, cx - 34, cy - 22);
+    if (i === 3 && flags.stones_awoken) drawFlourish(ctx, cx - 34, cy + 22);
+  }
+  drawCompassRose(ctx);
+}
+
+export function renderMap(canvas, opts) {
+  const ctx = canvas.getContext('2d');
+  if (canvas.width !== CAN_W) { canvas.width = CAN_W; canvas.height = CAN_H; }
+  const flags = opts.flags || {};
+  const visited = opts.visited || new Set();
+  const hash = staticHash(flags, visited);
+  if (!_staticCache || _staticCache.hash !== hash) {
+    const off = document.createElement('canvas');
+    off.width = CAN_W; off.height = CAN_H;
+    drawStaticLayer(off.getContext('2d'), flags, visited);
+    _staticCache = { hash, canvas: off };
+  }
+  ctx.clearRect(0, 0, CAN_W, CAN_H);
+  ctx.drawImage(_staticCache.canvas, 0, 0);
+  if (opts.player) {
+    const [px, py] = worldToCanvas(opts.player.x, opts.player.z);
+    drawHeroineMarker(ctx, px, py, opts.player.facingY || 0);
+  }
+}
+
+// Called on ending "return to woods" to reset the cache so a fresh run rebuilds it.
+export function resetMapCache() { _staticCache = null; }

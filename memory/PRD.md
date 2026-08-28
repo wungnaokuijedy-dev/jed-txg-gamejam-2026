@@ -197,3 +197,38 @@ Jam judge / player on a desktop Chrome browser. No authentication. No accounts.
 - **AudioContext** starts on the first menu button click — that means a player who never clicks anything but the Continue button on their first-ever visit still triggers audio init (Continue is also a click). Fine.
 - Auto-degrade uses `_degraded` as a one-time latch — deliberately does not step down further. If the player manually raises quality after a degrade, the latch prevents another auto-drop.
 - Map re-renders every 500 ms while open; the parchment texture is redrawn from scratch each time. Cheap enough on desktop but a future pass could cache the static layer to an offscreen canvas.
+
+## Phase 5 additions (Feb 2026 — this session, submission polish)
+- **Per-area footstep filter** — `AudioEngine._playFoot` switches on `_areaName`. Entrance = crisp leaf crunch (bandpass 900-1300 Hz, Q=5), Whispering Woods = default soft grass, Silent Stream = damp lowpass ~220 Hz, Grove/Heart = resonant wood (bandpass 360-460 Hz, longer decay).
+- **Silence-ending mood** — `Endings.playSilence()` emits `silence_mood: { on: true }`; GameApp toggles a `wnl-silence-mood` document-root class. CSS applies `filter: saturate(0.55) contrast(0.96) brightness(0.92)` to the canvas + a stronger radial vignette, both with a 3.2 s ease transition. Reset on Return-to-Woods.
+- **Map offscreen cache** — `renderMap()` now hashes `(flags, visited)` and re-uses an offscreen canvas for the static layer; per-frame updates only clear + blit the cache and stamp the player marker. `resetMapCache()` clears the cache on ending → menu.
+- **Main menu "Endings discovered: N / 3"** — screen-reader friendly line beneath the leaf glyphs (`data-testid="endings-count"`, `aria-live="polite"`). Reads corrupt-storage-safely (Save.js now guards `endingsSeen()` against non-object / array parses).
+- **Credits creator constant** — `export const CREATOR_NAME` at the top of `components/game/Menus.jsx`. Change one line to swap the entrant name.
+- **Error-handling audit fixes**:
+  - Auto-pause on pointer-lock loss: `onPointerLockChange(locked=false)` while playing (and not in cinematic/choice/ending/modal) pauses the game and shows the pause menu, so Esc-or-Alt-Tab → clean pause with no black-screen dead-zone.
+  - Stuck-player safety: after each `charCtrl.update` while in gameplay, if the character is out of bounds (`|x| > 80` or `z < -95` or `z > 55`) OR falls > 6 m below terrain, `Game.restartArea()` respawns them at Area 1 with camera reset.
+  - Corrupt `wnl_endings_seen` / `wnl_settings_v1` / `wnl_save_v1` — all three loaders wrap `JSON.parse` in try/catch AND check the parsed shape; game boots cleanly with the corrupt key wiped.
+  - Rapid-input abuse: M key is now guarded against opening during choice UI or ending; `resolveFinalChoice` guards double-commits via `if (this.gameState.choiceMade) return;`; `interactables._trigger` already had `if (this.busy) return;`.
+
+## Phase 5 — Bundle size + build report
+- `yarn build` output (production, minified + gzipped):
+  - JS: **231 kB gzipped** (883.6 kB raw, single chunk)
+  - CSS: **12.4 kB gzipped** (66.1 kB raw)
+  - Total build folder: **4.3 MB** (includes source maps)
+- Well under the jam limit; a fresh `serve -s build` boots to the main menu and plays end-to-end (verified with `python3 -m http.server` locally).
+
+## Phase 5 — README (submission)
+- `/app/README.md` created with: game description + tagline, theme integration paragraph, technology table with versions and licenses (React 19, ReactDOM 19, Three.js 0.161.0, all MIT — the only libs that ship in the bundle), AI disclosure (Emergent AI + Claude, procedural art/audio), fonts declaration (system serif only — no @font-face, no Google Fonts request), controls table (only keys that work), how-to-run (production `yarn build` + static serve, or dev `yarn start`), system requirements, known limitations (desktop only, single-slot save, save fast-forwards rather than replaying cinematics, auto-degrade one-shot).
+
+
+## Phase 5 — Creator identity (submission)
+- `CREATOR_NAME` constant (top of `/app/frontend/src/components/game/Menus.jsx`) → **"Wungnaokui Awungshi"** (Solo Developer, jam handle `@princejedd`).
+- **Credits screen** (surgical): shows GAME BY / ENGINE / ART & AUDIO / TYPOGRAPHY / MADE FOR. The old "BUILT WITH — Emergent AI (Claude) assistance" section was **removed at client's request**; layout, typography, animations, and spacing are unchanged.
+- **README.md** keeps the full AI-usage disclosure (jam rules require it in the disclosure document). The README's Credits section now lists the full byline: *Game by Wungnaokui Awungshi — Solo Developer — @princejedd*, with a note pointing readers to the AI disclosure section above.
+
+## Phase 5 acceptance — testing_agent iteration_2 verdict
+- **29 / 29 acceptance items PASS**, 0 runtime bugs, 0 console errors across 30+ interactions.
+- Two headless-only overlay-stacking flakes on `map-close-btn` and `pause-resume-btn` (Chromium-headless z-index timing artifact, resolved with `force=True`). Testing agent explicitly notes these are not expected in real desktop Chrome and recommends a human visual pass.
+- Production bundle: **231.09 kB gzipped JS + 12.44 kB gzipped CSS** — well under the jam limit.
+- Full report: `/app/test_reports/iteration_2.json`.
+

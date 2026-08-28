@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from '../../game/Game.js';
+import { resetMapCache } from '../../game/Map.js';
 import {
   MainMenu, PauseMenu, SettingsScreen, ControlsScreen, CreditsScreen,
   MapScreen, ConfirmOverwrite, AutosaveTick, DegradeNotice,
@@ -93,6 +94,19 @@ export default function GameApp() {
   const autosaveTimerRef = useRef(null);
   const [degradeMsg, setDegradeMsg] = useState(null);
   const degradeTimerRef = useRef(null);
+  const [silenceMood, setSilenceMood] = useState(false);
+
+  // Refs to expose current state to callbacks that only see closure of first mount.
+  const screenRef = useRef('loading');
+  const pauseMenuRef = useRef(false);
+  const overlayRef = useRef(null);
+  const choiceOpenRef = useRef(false);
+  const endingRef = useRef(null);
+  useEffect(() => { screenRef.current = screen; }, [screen]);
+  useEffect(() => { pauseMenuRef.current = pauseMenu; }, [pauseMenu]);
+  useEffect(() => { overlayRef.current = overlay; }, [overlay]);
+  useEffect(() => { choiceOpenRef.current = choiceOpen; }, [choiceOpen]);
+  useEffect(() => { endingRef.current = ending; }, [ending]);
 
   // Settings values snapshot for the UI
   const [settingsValues, setSettingsValues] = useState(null);
@@ -115,7 +129,20 @@ export default function GameApp() {
         setScreen('menu');
         setSettingsValues(game.settings.getAll());
       },
-      onPointerLockChange: () => { /* no-op — we handle Esc via keydown */ },
+      onPointerLockChange: (locked) => {
+        if (cancelled) return;
+        // Auto-pause when pointer lock is lost mid-gameplay (typical: user pressed
+        // Esc or Alt-Tab'd). Skip if a modal / cinematic-driven UI is already open
+        // — those flows drive their own state.
+        if (locked) return;
+        if (screenRef.current !== 'playing') return;
+        if (pauseMenuRef.current) return;
+        if (overlayRef.current) return;
+        if (choiceOpenRef.current) return;
+        if (endingRef.current) return;
+        if (gameRef.current) gameRef.current.pause();
+        setPauseMenu(true);
+      },
       onError: (e) => { if (!cancelled) setErrorMsg(e && e.message ? e.message : 'WebGL error'); },
       onStats: (s) => {
         if (cancelled) return;
@@ -157,6 +184,7 @@ export default function GameApp() {
         setEnding({ kind, message, choice });
         setScreen('ending');
       },
+      onSilenceMood: (on) => { if (!cancelled) setSilenceMood(!!on); },
       onAutosave: () => {
         if (cancelled) return;
         setAutosaveOn(true);
@@ -214,6 +242,8 @@ export default function GameApp() {
       if (e.code === 'KeyM' && !overlay) {
         e.preventDefault();
         if (pauseMenu) return;
+        if (choiceOpen) return;   // do not steal the choice moment
+        if (ending) return;
         setOverlay('map');
         return;
       }
@@ -232,7 +262,7 @@ export default function GameApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, overlay, pauseMenu, choiceOpen]);
 
-  // Apply CSS classes for text size / high contrast from settings
+  // Apply CSS classes for text size / high contrast / silence-mood
   useEffect(() => {
     if (!settingsValues) return;
     const root = document.documentElement;
@@ -241,6 +271,10 @@ export default function GameApp() {
       settingsValues.textSize === 'l' ? 'wnl-text-l' : 'wnl-text-m');
     root.classList.toggle('wnl-high-contrast', !!settingsValues.highContrast);
   }, [settingsValues]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('wnl-silence-mood', !!silenceMood);
+  }, [silenceMood]);
 
   // ============================================================
   // Commands (buttons)
@@ -359,6 +393,8 @@ export default function GameApp() {
     setEndingsSeen(g.endingsSeen());
     setLetterboxOn(false);
     setHudHidden(false);
+    setSilenceMood(false);
+    resetMapCache();
     g.enterMenuMode();
     if (g.audio) g.audio.setMusicMode('exploration');
   }, []);

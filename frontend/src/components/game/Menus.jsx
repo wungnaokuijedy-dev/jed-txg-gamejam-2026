@@ -461,3 +461,69 @@ export function DegradeNotice({ preset }) {
     </div>
   );
 }
+
+
+// -------------------------------------------------------
+// Demo Mode HUD — beat caption + progress dots + subtle fade overlay.
+// Only rendered when the hidden demo is active. Never in the normal menu.
+// -------------------------------------------------------
+export function DemoHUD({ beatIdx, beatCount, label, fadeAlpha }) {
+  const dots = [];
+  for (let i = 0; i < (beatCount || 7); i++) {
+    dots.push(
+      <span
+        key={i}
+        className={
+          'wnl-demo-dot' +
+          (i < beatIdx ? ' is-done' : i === beatIdx ? ' is-current' : '')
+        }
+        data-testid={`demo-dot-${i}`}
+      />
+    );
+  }
+  const alpha = Math.max(0, Math.min(1, fadeAlpha || 0));
+  return (
+    <>
+      <div className="wnl-demo-hud" data-testid="demo-hud">
+        {label ? (
+          <div className="wnl-demo-caption" data-testid="demo-caption">{label}</div>
+        ) : null}
+        <div className="wnl-demo-dots" data-testid="demo-dots">{dots}</div>
+        <div className="wnl-demo-key-hint" data-testid="demo-key-hint">
+          N — next beat &nbsp;·&nbsp; Esc — exit demo
+        </div>
+      </div>
+      {alpha > 0 && (
+        <div
+          className="wnl-demo-fade"
+          data-testid="demo-fade"
+          style={{ opacity: alpha, pointerEvents: alpha > 0.5 ? 'auto' : 'none' }}
+        />
+      )}
+    </>
+  );
+}
+
+// -------------------------------------------------------
+// Exit-demo confirmation (Esc while in demo)
+// -------------------------------------------------------
+export function ExitDemoConfirm({ onKeep, onExit }) {
+  return (
+    <div className="wnl-overlay wnl-confirm" data-testid="exit-demo-confirm">
+      <div className="wnl-confirm-card">
+        <div className="wnl-confirm-title">Exit the demo?</div>
+        <div className="wnl-confirm-body">
+          You'll return to the main menu. Your normal save is untouched.
+        </div>
+        <div className="wnl-confirm-actions">
+          <button className="wnl-menu-btn" onClick={onKeep} data-testid="exit-demo-keep-btn">
+            <span className="wnl-menu-btn-label">Keep playing</span>
+          </button>
+          <button className="wnl-menu-btn" onClick={onExit} data-testid="exit-demo-confirm-btn">
+            <span className="wnl-menu-btn-label">Exit demo</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

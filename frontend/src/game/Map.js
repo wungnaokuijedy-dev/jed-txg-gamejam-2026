@@ -48,7 +48,7 @@ function drawParchment(ctx) {
 }
 
 // Inky organic blob for an area's illustrated region.
-function inkyBlob(ctx, cx, cy, rx, ry, seed, fill, stroke) {
+function inkyBlob(ctx, cx, cy, rx, ry, seed, fill, stroke, lineWidth) {
   ctx.save();
   ctx.beginPath();
   const N = 24;
@@ -63,7 +63,7 @@ function inkyBlob(ctx, cx, cy, rx, ry, seed, fill, stroke) {
   ctx.closePath();
   ctx.fillStyle = fill;
   ctx.fill();
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = (lineWidth != null) ? lineWidth : 1.5;
   ctx.strokeStyle = stroke;
   ctx.stroke();
   ctx.restore();
@@ -187,18 +187,36 @@ function drawFlourish(ctx, x, y) {
 function drawUnknownArea(ctx, cx, cy) {
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.strokeStyle = 'rgba(90,60,30,0.4)';
+  ctx.strokeStyle = 'rgba(90,60,30,0.32)';
   ctx.setLineDash([4, 6]);
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.3;
   ctx.beginPath();
   ctx.ellipse(0, 0, 60, 42, 0, 0, Math.PI * 2);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = 'rgba(90,60,30,0.6)';
+  ctx.fillStyle = 'rgba(90,60,30,0.55)';
   ctx.font = 'italic 30px serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('?', 0, 0);
+  ctx.restore();
+}
+
+// A tiny hand-drawn "ink seal" — a filled dot with a thin ring — used to
+// visually flag areas the player has actually discovered. Placed just above
+// the label so it never obscures the region art.
+function drawDiscoveredSeal(ctx, cx, cy) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.fillStyle = 'rgba(90,50,20,0.95)';
+  ctx.beginPath();
+  ctx.arc(0, 0, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(60,35,15,0.85)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(0, 0, 4.4, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -280,11 +298,11 @@ function drawStaticLayer(ctx, flags, visited) {
   if (visited.has(3) || flags.restore_done) drawStream(ctx, !!flags.restore_done);
 
   const styles = [
-    { fill: 'rgba(150,180,120,0.55)', stroke: 'rgba(60,80,40,0.85)' },
-    { fill: 'rgba(100,140,90,0.55)',  stroke: 'rgba(30,60,20,0.9)' },
-    { fill: 'rgba(120,150,140,0.55)', stroke: 'rgba(30,60,60,0.9)' },
-    { fill: 'rgba(160,150,170,0.55)', stroke: 'rgba(60,40,90,0.9)' },
-    { fill: 'rgba(200,170,110,0.55)', stroke: 'rgba(120,80,20,0.9)' },
+    { fill: 'rgba(150,180,120,0.72)', stroke: 'rgba(50,72,32,1.00)' },
+    { fill: 'rgba(100,140,90,0.72)',  stroke: 'rgba(24,54,16,1.00)' },
+    { fill: 'rgba(120,150,140,0.72)', stroke: 'rgba(22,54,54,1.00)' },
+    { fill: 'rgba(160,150,170,0.72)', stroke: 'rgba(54,34,86,1.00)' },
+    { fill: 'rgba(200,170,110,0.72)', stroke: 'rgba(110,72,16,1.00)' },
   ];
 
   for (let i = 0; i < AREAS.length; i++) {
@@ -292,7 +310,9 @@ function drawStaticLayer(ctx, flags, visited) {
     const [cx, cy] = worldToCanvas(a.center[0], a.center[1]);
     if (!visited.has(a.id)) { drawUnknownArea(ctx, cx, cy); continue; }
     const s = styles[i] || styles[0];
-    inkyBlob(ctx, cx, cy, 68, 46, i * 1.7, s.fill, s.stroke);
+    // Discovered areas get a beefier stroke so they read as unmistakably
+    // distinct from the faint dashed "?" of undiscovered.
+    inkyBlob(ctx, cx, cy, 68, 46, i * 1.7, s.fill, s.stroke, 2.0);
 
     if (i === 0) {
       drawTree(ctx, cx - 22, cy + 6, 1.3, 1);
@@ -331,6 +351,10 @@ function drawStaticLayer(ctx, flags, visited) {
     ctx.textBaseline = 'top';
     ctx.fillText(a.name, cx, cy + 34);
     ctx.restore();
+
+    // Small ink seal just above the label — a "seen" mark unique to
+    // discovered areas that reads instantly at a glance.
+    drawDiscoveredSeal(ctx, cx + 30, cy + 28);
 
     if (i === 1 && flags.grow_done) drawFlourish(ctx, cx + 34, cy - 22);
     if (i === 2 && flags.restore_done) drawFlourish(ctx, cx - 34, cy - 22);

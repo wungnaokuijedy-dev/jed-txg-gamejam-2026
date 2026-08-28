@@ -329,3 +329,52 @@ Hard constraint honoured: **zero changes to gameplay logic, story, objectives, p
 - **Rebuild after fixes**: `yarn build` → **234.78 kB gzipped JS** (+179 B) + 12.70 kB CSS. README section 9 updated to match.
 - Verified both fixes in headless: pause hides hint + sets `_deferred=true`; resume restores hint text ("WASD — walk the forest") + sets `_deferred=false`. Continue with saved `tutorial_done` produces `{done: true, active: false, hint: null, flag: true}`. Zero console errors.
 
+
+## Phase 6c — Exploration Polish + Hidden Demo Mode (Feb 2026, this session)
+
+### Exploration polish pass (all 3 items — client-reported)
+- **Footstep audio sync — REAL BUG FIXED.** `AudioEngine.updateFootsteps` used to gate on `character.moveBlend` alone (damped low-pass of speed with λ=8, ~130 ms time constant). After the player released movement keys, `moveBlend` + `phase` kept advancing for the ~200 ms velocity-decay window and produced 1–2 trailing footsteps. **Now gates on the ACTUAL horizontal speed** (√(vx²+vz²) ≥ 0.4 m/s AND moveBlend ≥ 0.15) and resets `_lastFootIndex = -1` the moment the gate closes so no phase-index carry-over fires a spurious step on gate re-open. Cadence still scales walk→run→sprint via `phase`. Verified iteration_6 T2 measured 14 crossings walking / 25 crossings sprinting in equal wall-time — cadence does scale correctly.
+- **Movement feel — verified, no regression.** Sprint peaks 6.49 m/s (target 6.5). No jitter across A/D taps, sprint on/off, diagonals, or 180° reversals. Zero console errors on scripted movement. No tuning changes made — the last approved fix holds.
+- **Map open/close — REAL BUG FIXED.** M was previously blocked by an `if (e.code === 'KeyM' && !overlay)` guard, so pressing M when the map was open did nothing (contradicting the "M — close" hint in the map header). **Now M toggles: closed→open→closed → …** M spam-tolerant (6× rapid presses land on the correct state). Opening the map now calls `document.exitPointerLock()` so the cursor is visible for the Close button; closing via the Close button (a fresh click gesture) re-acquires pointer lock. M is blocked during pause / choice / ending / other overlays (unchanged). Esc still closes map cleanly. Verified via iteration_6 T3-T7 all PASS.
+- **Discovered-area map clarity — improved.** In `Map.js`, `inkyBlob` now accepts an optional `lineWidth` argument; visited-area strokes upgraded to `lineWidth: 2.0` and their palette bumped to `fill 0.72α` + `stroke 1.00α` (from 0.55 / 0.85). Unknown-area dashed outline faded from `0.4α` to `0.32α` to widen the contrast gap. New `drawDiscoveredSeal()` helper draws a small "ink seal" dot near each discovered area's label as a first-visit flourish. The mini-map picks these up automatically via the shared static-layer cache.
+- **Ambient immersion spot-check** — grass wind + player-bend, tree sway, per-area ambience all confirmed active on iteration_6 screenshots. No regression.
+- Verified iteration_6: 10/10 PASS, sprint 6.49 m/s, zero console errors, no issues found.
+
+### Hidden Demo Mode (new — for the 2-minute jam video)
+- **New file `/app/frontend/src/game/DemoDirector.js`** — 7-beat scripted director:
+  1. `opening` (0–15 s target): real opening cinematic plays; auto-advances on cinematic end.
+  2. `controls` (15–35 s): 5 quick tutorial hints (WASD → SHIFT → SPACE → E → M with mini-map pulse) reusing the real `tutorial_hint` event pipeline. No new UI invented.
+  3. `seeds` (35–55 s): teleports to (4, y, 12) near Area 1's `seed_1`; objective "Follow what glows"; advances on `gameState.seeds >= 1`.
+  4. `bridge` (55–75 s): teleports to (-40, y, -2) near the withered plant, guarantees `seeds ≥ 1`; advances on `puzzleFlags.grow_done`.
+  5. `stream` (75–95 s): teleports to (42, y, -12) near the spring; pre-sets `grow_done`; advances on `puzzleFlags.restore_done`.
+  6. `grove` (95–110 s): teleports to Area 4; pre-sets `grow_done`, `restore_done`, `bird_freed`, `stones_awoken`; advances when player enters Area 5's radius.
+  7. `choice` (110–120 s): teleports to Heartseed; pre-sets `heart_reached`, bumps health to 85; calls `startFinalChoiceSequence()`; advances on `endingResolved`. Ending card = video outro.
+- **Fade state machine** (0.5 s to black → teleport → 0.5 s back to clear). Guarded against re-entry mid-fade.
+- **Isolation** — never touches localStorage. Verified iteration_7 T1: after a full demo run to Guardian ending, `wnl_save_v1` and `wnl_endings_seen` are **byte-identical** to their seeded values.
+- **Activation** — `?demo=1` URL param auto-starts after main menu appears; F9 on main menu starts manually. Neither is discoverable from the UI. Menu text does NOT contain "demo" (case-insensitive).
+- **N key** — force-advance (0.5 s fade → next beat's setup → 0.5 s fade in). Also mirrored on `window.__wnl.demo.forceAdvance()` for automation.
+- **Esc → ExitDemoConfirm modal** — "Keep playing" / "Exit demo" buttons. Never opens the regular Pause Menu (auto-pause-on-pointer-lock-loss is now gated by `demoActiveRef.current`).
+- **Recorder-friendly**:
+  - Autosave writes suppressed while `_demoMode === true` (verified iteration_7 T1: no autosave firings, save byte-identical).
+  - `applyQuality('high')` called at startDemoFlow to force High for the recording session (persisted `settings` unchanged).
+  - HUD kept minimal but intact (health tier, seed count, objective whisper, mini-map, interaction prompts).
+- **Game.js gates**:
+  - `newGame()` — skips `clearSave()` when `_demoMode`.
+  - `_doAutosave()` — early-return when `_demoMode`.
+  - `saveNow()` — early-return when `_demoMode`.
+  - Ending `onEnd` — skips `recordEndingSeen()` + `clearSave()` when `_demoMode`.
+  - `startDemo()` resets in-memory GameState (health, seeds, flags, doneInteractions, visitedAreas, objective) but never localStorage.
+  - `stopDemo()` clears `_demoMode`, stops any active cinematic, resets weather baseline, unhides HUD.
+- **UI additions** (`Menus.jsx`): `<DemoHUD>` (caption + 7 progress dots + "N — next · Esc — exit" hint + fade overlay), `<ExitDemoConfirm>` (Keep / Exit buttons). Every element has a `data-testid`.
+- **CSS additions** (`App.css`): `.wnl-demo-hud`, `.wnl-demo-caption`, `.wnl-demo-dots`, `.wnl-demo-dot` (base / is-done / is-current with 1.35× scale + glow), `.wnl-demo-key-hint`, `.wnl-demo-fade`.
+- **README section 12** — "Recording the 2-minute demo" with usage instructions and the plainly-stated note that Emergent cannot export MP4; user records real gameplay with OBS/DevTools/OS recorder.
+
+### Verified iteration_7 — 4/4 PASS
+- T1 Demo isolation: **PASS**. Byte-identical save + endings, 6-beat traversal, Guardian ending card visual confirmed.
+- T2 F9-from-menu / no-demo-without-activation: **PASS**. Menu innerText contains no "demo"; F9 activates cleanly.
+- T3 Esc → Exit Demo → real save intact: **PASS**. `REAL_SAVE` sentinel byte-identical after exit.
+- T4 Normal New Game regression: **PASS**. Zero console errors, tutorial hint visible, M-toggle both directions.
+
+### Observed pacing note (headless)
+Headless Chromium runs rAF at ~40% wall-clock speed, so I did NOT observe realistic per-beat times in automation. The `targetSecs` values encoded in each beat sum to exactly 120 s (15 + 20 + 20 + 20 + 20 + 15 + 10). Real per-beat pacing will be measured by the creator on their own recorder machine when they capture the video (that's the reason for the N force-advance + `timeoutMs` safety per beat).
+

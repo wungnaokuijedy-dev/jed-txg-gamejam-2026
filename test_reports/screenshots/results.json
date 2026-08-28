@@ -1,0 +1,77 @@
+{
+  "results": {
+    "test1_footstep_gate": {
+      "still_all_neg1": true,
+      "walking_moved": true,
+      "walking_foot_advanced": true,
+      "walk_horiz": 3.1824865874750556,
+      "stop_index_returned_to_neg1_and_held": true,
+      "pass": true
+    },
+    "test2_cadence": {
+      "walk_horiz": 3.4999998952546707,
+      "walk_changes": 14,
+      "sprint_horiz": 6.499997297218861,
+      "sprint_changes": 25,
+      "pass": true
+    },
+    "test3_map_toggle_M": {
+      "first_M_opens": true,
+      "second_M_closes": true,
+      "six_M_ends_closed": true,
+      "pass": true
+    },
+    "test4_map_close_button": {
+      "opened": true,
+      "closed": true,
+      "mini_map": false,
+      "health_hud": true,
+      "pass": true
+    },
+    "test5_map_close_esc": {
+      "map_open": true,
+      "map_closed_by_esc": true,
+      "pause_after_2nd_esc": true,
+      "pass": true
+    },
+    "test6_map_during_pause": {
+      "pause_up": true,
+      "map_blocked": true,
+      "pause_still": true,
+      "pass": true
+    },
+    "test7_map_during_choice": {
+      "choice_opened": true,
+      "map_blocked": true,
+      "choice_still": true,
+      "pass": true
+    },
+    "test8_map_visual": {
+      "map_visible": true,
+      "visited_count": 1,
+      "visited_ids": [
+        1
+      ],
+      "screenshot": "/app/test_reports/screenshots/map_discovered.png",
+      "pass": true
+    },
+    "test9_movement": {
+      "peak_horiz": 6.485564594009127,
+      "any_nan": false,
+      "max_facing_delta": 1.1694940991970597,
+      "big_spikes": 0,
+      "new_console_errors": 0,
+      "pass": true
+    },
+    "test10_puzzle": {
+      "error": {
+        "err": "no seed found",
+        "count": 0,
+        "sample": []
+      },
+      "pass": false,
+      "prompt_visible": false
+    }
+  },
+  "console_errors": []
+}

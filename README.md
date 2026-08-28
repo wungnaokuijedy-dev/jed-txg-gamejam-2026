@@ -179,12 +179,52 @@ For QA automation, the game exposes read-only handles on `window.__wnl`:
 - `window.__wnl.isPaused()` / `.pause()` / `.resume()`.
 - `window.__wnl.startFinalChoiceSequence()`.
 - `window.__wnl.cinematic.stop()` — force-end any active cinematic (bypasses `minSkipT`).
+- `window.__wnl.demo` — the DemoDirector (see § 12 below). `.forceAdvance()` mirrors N.
+- `window.__wnl.isDemoMode()` / `.startDemo()` / `.stopDemo()`.
 
 Every interactive UI element carries a `data-testid` attribute. See `/app/memory/test_credentials.md` for the full list.
 
 ---
 
-## 12. Known limitations
+## 12. Recording the 2-minute demo
+
+The jam requires a short gameplay video. **Emergent cannot export an MP4 for you** — you record real gameplay from your browser (OBS, Windows Game Bar, macOS Shift-⌘-5, Chrome's "Record" tab in DevTools → Recorder, etc.). The game ships a hidden, purely additive **Demo Mode** that compresses the whole loop into ~2 minutes of genuine play, so you don't have to freestyle a full run for the camera.
+
+### What it is
+
+- Seven scripted **beats** paced to ~2 minutes total (opening → controls → seeds → vine bridge → silent stream → grove → Heartseed choice + Guardian ending).
+- Each beat teleports the player, pre-arranges world state (e.g. spring already needs clearing, stones already awakened when you reach the grove), shows a small caption at the top, and lets you **actually play the beat**. It is not a cutscene reel.
+- A tiny row of **7 dots** near the top shows progress. The current beat is highlighted; completed beats fill in.
+- **N** = force-advance (0.5 s fade → next beat). **Esc** = confirm "Exit Demo" and return to the main menu.
+- **Isolated persistence.** Demo mode never reads or writes your normal save (`wnl_save_v1`) or your endings-seen record (`wnl_endings_seen`). Your real playthrough is completely untouched.
+
+### How to record
+
+1. Set up your screen recorder (**OBS**, **Chrome DevTools → Recorder**, or your OS's built-in tool). Match your **canvas region** — full 1080p or 720p works.
+2. Open the game with the query string:
+
+   ```
+   https://<your-host>/?demo=1
+   ```
+
+   The main menu will briefly appear and Demo Mode auto-starts. *(Alternative: from the main menu, press **F9** to start Demo Mode manually. F9 is intentionally not shown in the menu — it's for the creator only.)*
+3. Start your recorder as the opening cinematic begins. Play the game **for real** for each beat. Use **N** if you feel a beat has served its purpose and you want to move on. Total run: ~2 minutes.
+4. After picking a choice at the Heartseed, the ending cinematic + card runs as the outro. Stop recording on the ending card.
+5. Click **Return to the woods** or **Exit demo** to leave. Your normal save + endings record are still where you left them.
+
+### Recorder-friendly touches (only in demo mode)
+
+- Autosave writes are suppressed (no "saved" leaf tick appearing in your footage).
+- The demo forces **Quality: High** at runtime for the recording session. Your persisted setting is not overwritten; the game's auto-degrade watcher will still step down if your recording machine can't hold the framerate.
+- Non-essential HUD noise is muted; the health tier icon, seed count, objective whisper, mini-map, and interaction prompts stay on-screen because they read as the game at its best.
+
+### If you'd rather freestyle
+
+You don't have to use Demo Mode. A real playthrough of the game runs ~10–12 minutes; edit a 2-minute cut of your favourite beats. Demo Mode exists purely to make the "same shot every time" recording easy for the creator.
+
+---
+
+## 13. Known limitations
 
 - **Desktop only.** No touch controls, no mobile layout, no gamepad. Pointer Lock is required for the mouse-look camera.
 - **Pointer-lock quirks.** Some browsers rate-limit the re-acquisition of pointer lock after Esc — the pause menu handles this cleanly, but rapid Esc mashing may briefly wait a beat before letting you re-lock.
@@ -193,10 +233,11 @@ Every interactive UI element carries a `data-testid` attribute. See `/app/memory
 - **Auto-degrade is one-shot.** The performance watcher will lower Quality at most once per session; if you then set it back to High manually, the watcher won't step it down again automatically.
 - **Autoplay policy.** `AudioContext` is created on your first menu button click. In normal play this is always Continue or New Game, so audio initialises before you enter the forest.
 - **Heart-choice arc camera** occasionally clips a tall trunk in the composition on the way in — cosmetically acceptable for jam scope.
+- **No MP4 export.** Emergent runs the game in a browser tab, not a rendered offline pipeline — capture your video with a screen recorder. See section 12.
 
 ---
 
-## 13. Credits
+## 14. Credits
 
 - Game by **Wungnaokui Awungshi** — Solo Developer — [@princejedd](https://www.indieconnect.in/@princejedd)
 - Development assistance & code generation: **Emergent AI (Anthropic Claude)** *(fully disclosed in section 6 above, per jam rules)*
@@ -207,6 +248,6 @@ Every interactive UI element carries a `data-testid` attribute. See `/app/memory
 
 ---
 
-## 14. License
+## 15. License
 
 The source code for this game is released under the **MIT License**. Third-party dependencies retain their original licenses (all MIT or SIL OFL; see section 5 and section 7).

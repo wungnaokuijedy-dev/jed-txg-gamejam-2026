@@ -1,0 +1,68 @@
+{
+  "summary": "Independent gate on the hidden Demo Mode (7-beat scripted showcase). Ran all 4 requested tests (T1 demo isolation, T2 F9-from-menu / no-demo-without-activation, T3 Esc exit-demo-with-real-save-intact, T4 normal new-game regression). All 4 PASS. Zero console errors across the T4 normal-play regression. localStorage byte-identity confirmed in both T1 (wnl_save_v1='SENTINEL_ABC', wnl_endings_seen='{\"guardian\":1}' — both unchanged) and T3 (wnl_save_v1='REAL_SAVE' — untouched).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "measured_results": {
+    "T1_demo_isolation": {
+      "isDemoMode_after_urlparam": true,
+      "demo_hud_present": true,
+      "beat_progression_after_6_N_presses": [1, 2, 3, 4, 5, 6],
+      "beatIdx_reached_6": true,
+      "share_choice_btn_appeared": true,
+      "ending_card_visible_after_share": true,
+      "ending_card_label_visual": "THE GUARDIAN / You listened.",
+      "localStorage.wnl_save_v1_after": "SENTINEL_ABC",
+      "localStorage.wnl_endings_seen_after": "{\"guardian\":1}",
+      "byte_identical_to_seed": true,
+      "note_on_endingKind_read": "First read of gameState.endingKind returned null because the read fired between choice-click and resolveEnding on the same tick; the DOM ending-card React state (fed from the ending event) rendered correctly as guardian in the same window (see /app/test_reports/screenshots/t1_ending_guardian.png). Confirmed via a second full run where the ending-card visually reads THE GUARDIAN. No product bug.",
+      "verdict": "PASS"
+    },
+    "T2_F9_from_menu_no_demo_without_activation": {
+      "menu_innerText_contains_demo_case_insensitive": false,
+      "before_F9_isDemoMode": false,
+      "before_F9_demo_hud_present": false,
+      "after_F9_isDemoMode": true,
+      "after_F9_demo_hud_present": true,
+      "screenshot": "/app/test_reports/screenshots/t2_f9_demo.png",
+      "verdict": "PASS"
+    },
+    "T3_esc_exit_demo_real_save_intact": {
+      "beat_after_one_N": 1,
+      "exit_demo_confirm_visible_after_Esc": true,
+      "after_confirm_isDemoMode_false": true,
+      "main_menu_visible_after_exit": true,
+      "localStorage.wnl_save_v1_after": "REAL_SAVE",
+      "real_save_untouched": true,
+      "verdict": "PASS"
+    },
+    "T4_normal_new_game_regression": {
+      "demo_active_false": true,
+      "no_demo_hud_in_DOM": true,
+      "tutorial_hint_visible": true,
+      "tutorial_hint_text": "WASD — walk the forest",
+      "M_opens_map_screen": true,
+      "second_M_closes_map_screen": true,
+      "console_errors_count": 0,
+      "verdict": "PASS"
+    }
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots/t2_f9_demo.png",
+    "/app/test_reports/screenshots/t1_ending_guardian.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "DemoDirector.forceAdvance (lines 220-227) correctly no-ops when a fade is in flight (_fadeDir !== 0), preventing beat-skipping under rapid N presses. Verified in T1 by polling _fadeDir===0 between advances.",
+    "DemoDirector._enter (lines 290-307) resets _hintIdx/_hintT/_hintsDone and calls beat.setup(game) inside a try/catch — a beat that throws in setup will not brick the director. Good defensive posture for a hidden showcase.",
+    "Demo isolation: T1 seeded both wnl_save_v1 and wnl_endings_seen, ran a full 7-beat playthrough with a Guardian ending, and both keys were byte-identical to the seed after the ending card rendered. This confirms the _demoMode gating on newGame/saveNow/_doAutosave/ending in Game.js is complete.",
+    "Menus.jsx DemoHUD (lines 470-505) correctly guards the fade div with alpha>0 so no stray full-screen div sits in the DOM when the demo is idle. Pointer-events flip at alpha>0.5 is a nice touch that prevents click-eating during the darker half of a transition.",
+    "GameApp.jsx F9 handler and URL detect work end-to-end (T2 confirms both paths). The main-menu innerText contains no 'demo' substring, so the mode remains discoverable only via keybind/URL as intended."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "4/4 tests PASS"},
+  "test_credentials": "None — public game",
+  "seed_data_creation": "T1 seeded localStorage.wnl_save_v1='SENTINEL_ABC' and localStorage.wnl_endings_seen='{\"guardian\":1}'; T3 seeded localStorage.wnl_save_v1='REAL_SAVE'. Both were cleared/verified post-test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Demo Mode is fully working and correctly isolated from the player's real save/endings-seen state. Useful helpers for future agents: (a) window.__wnl.demo.forceAdvance() is authoritative and does NOT depend on the KeyboardEvent path — prefer it over dispatching N keydowns; (b) always poll window.__wnl.demo._fadeDir===0 before firing another forceAdvance() or the second call is silently ignored; (c) beat 6 (choice) needs ~1.5s game-time (~4s wall) after startFinalChoiceSequence() before the choice buttons mount — poll for [data-testid=choice-share-btn] rather than sleeping a fixed duration; (d) reading gameState.endingKind in the same tick as clicking a choice can return null even though the ending DOM has rendered — poll or check the [data-testid=ending-kind-guardian] element instead; (e) after any full-page navigation, window.__wnl is re-created — re-poll for window.__wnl.game before evaluating anything."
+}

@@ -1130,3 +1130,73 @@ html, body, #root {
   100% { box-shadow: 0 0 0 22px rgba(180, 220, 180, 0.0); }
 }
 
+
+
+/* --------------------------------------------------------
+   Demo Mode HUD — top-center caption, 7 progress dots, key
+   hint, and a full-screen fade overlay for beat transitions.
+   Only visible during the hidden showcase (?demo=1 / F9).
+   -------------------------------------------------------- */
+.wnl-demo-hud {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  color: rgba(240, 248, 236, 0.94);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+}
+.wnl-demo-caption {
+  font-style: italic;
+  font-size: 1.1rem;
+  letter-spacing: 0.22em;
+  padding: 6px 22px;
+  border-radius: 999px;
+  background: rgba(15, 25, 22, 0.5);
+  border: 1px solid rgba(210, 224, 210, 0.32);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: wnl-tutorial-in 500ms ease-out both;
+}
+.wnl-demo-dots {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.wnl-demo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(240, 250, 240, 0.20);
+  border: 1px solid rgba(210, 224, 210, 0.55);
+  transition: transform 240ms ease, background 240ms ease;
+}
+.wnl-demo-dot.is-done {
+  background: rgba(150, 200, 160, 0.85);
+  border-color: rgba(220, 240, 220, 0.9);
+}
+.wnl-demo-dot.is-current {
+  background: rgba(232, 242, 226, 0.95);
+  border-color: rgba(232, 242, 226, 1);
+  transform: scale(1.35);
+  box-shadow: 0 0 10px rgba(232, 242, 226, 0.55);
+}
+.wnl-demo-key-hint {
+  font-size: 0.72rem;
+  letter-spacing: 0.20em;
+  opacity: 0.62;
+  margin-top: 2px;
+  font-style: italic;
+}
+.wnl-demo-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: #05070a;
+  transition: opacity 60ms linear;
+}

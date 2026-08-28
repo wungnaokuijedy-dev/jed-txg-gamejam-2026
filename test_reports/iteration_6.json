@@ -1,0 +1,84 @@
+{
+  "summary": "Targeted regression pass for the 'exploration polish' hotfix (footstep gate, map open/close UX, discovered-area map clarity). All 10 review bullets PASS. Zero console errors across the full run. Peak sprint horizontal speed 6.49 m/s (target >=6.0, ideal 6.5). Screenshot of the discovered-area map layer captured at /app/test_reports/screenshots/map_discovered.png confirms visited Entrance renders as a solid inky blob with a thick 2.0px stroke, small dark 'ink seal' dot near its label, contrasting against 4 faint dashed '?' ellipses.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "measured_results": {
+    "test1_footstep_gate": {
+      "still_lastFootIndex_stays_-1": true,
+      "walking_horiz_m_s": 3.18,
+      "walking_moveBlend": 0.35,
+      "walking_lastFootIndex": 0,
+      "post_release_returns_to_-1_and_holds": true,
+      "verdict": "PASS"
+    },
+    "test2_footstep_cadence": {
+      "walk_horiz_m_s": 3.50, "walk_index_changes": 14,
+      "sprint_horiz_m_s": 6.50, "sprint_index_changes": 25,
+      "sprint_faster_than_walk": true,
+      "verdict": "PASS (sprint 25 vs walk 14 crossings in equal wall time)"
+    },
+    "test3_map_toggle_M": {
+      "first_M_opens": true, "second_M_closes": true, "six_rapid_M_ends_closed": true,
+      "verdict": "PASS"
+    },
+    "test4_map_close_button": {
+      "map_opened_via_M": true, "map_closed_via_button": true, "health_hud_visible_after_close": true,
+      "note": "mini-map testid not found on canvas but health-hud + game-container present → gameplay resumed",
+      "verdict": "PASS"
+    },
+    "test5_map_close_esc_then_pause": {
+      "map_closed_via_esc": true, "pause_menu_after_2nd_esc": true,
+      "verdict": "PASS"
+    },
+    "test6_map_during_pause": {
+      "M_blocked_during_pause_menu": true, "pause_menu_remained_visible": true,
+      "verdict": "PASS"
+    },
+    "test7_map_during_choice": {
+      "choice_overlay_opened": true, "M_blocked_during_choice": true, "choice_still_visible": true,
+      "verdict": "PASS (backed out cleanly via localStorage.clear + reload; ending NOT committed)"
+    },
+    "test8_map_visual_screenshot": {
+      "visited_area_ids": [1],
+      "screenshot": "/app/test_reports/screenshots/map_discovered.png",
+      "manual_visual_check": "Entrance rendered as solid green inky blob with visible dark ink-seal dot at label; other 4 areas are faint dashed '?' ellipses; stroke on discovered area is unmistakably thicker/darker than the dashed unknown outlines.",
+      "verdict": "PASS"
+    },
+    "test9_movement_regression_6s": {
+      "peak_sprint_horiz_m_s": 6.49,
+      "any_nan_in_velocity_or_facing": false,
+      "max_facing_delta_rad_per_150ms_sample": 1.17,
+      "large_facing_spikes_gt_1.5rad": 0,
+      "console_errors_during_run": 0,
+      "verdict": "PASS (yaw spring smooth, sprint hits 6.49/6.5 target, no NaN)"
+    },
+    "test10_puzzle_interaction_seed": {
+      "seed_target": "seed_1 at (6, 15)",
+      "interact_prompt_text": "E — Take the seed",
+      "prompt_appeared": true,
+      "kneel_sequence_started": true,
+      "seeds_hud_showed_1_in_screenshot": true,
+      "note": "Programmatic read of gameState.seeds returned 0 while interactables.busy=true mid-ceremony; the follow-up screenshot confirms the seeds-hud incremented to 1, i.e. the pickup completed successfully.",
+      "verdict": "PASS"
+    },
+    "total_console_errors_across_all_tests": 0
+  },
+  "test_report_links": ["/app/test_reports/screenshots/map_discovered.png", "/app/test_reports/screenshots/results.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AudioEngine.updateFootsteps (lines 493-513): gate logic is clean — dual criterion (horizSpeed<0.4 OR moveBlend<0.15) resets _lastFootIndex to -1 immediately. Verified in headless: after key release, first sample with horiz<0.4 reset the index, and every subsequent sample held at -1 (no phantom trailing steps).",
+    "GameApp.jsx keydown (lines 246-283): M is correctly gated by pauseMenu/choiceOpen/ending/overlay checks; Esc handling of map is distinct from pause toggle. Verified all 5 map-toggle paths (M, second M, 6-rapid M, close-btn, Esc→pause).",
+    "Map.js drawStaticLayer + drawDiscoveredSeal (lines 208-221, 300-357): visited areas use fill alpha 0.72 + stroke alpha 1.00 + 2.0px linewidth + ink-seal dot at cx+30,cy+28; unknown areas use dashed 0.32-alpha strokes with '?' glyph. Visual differentiation is unmistakable in the captured screenshot."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "10/10 review bullets PASS"},
+  "test_credentials": "None — public game",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The 3 exploration-polish hotfixes are all working correctly and no regressions were introduced. Zero console errors across a ~90s multi-scenario run including movement stress, map toggle, pause, choice overlay, and puzzle interaction. Note for future runs: (a) window.__wnl.input.keys is the authoritative Set-based key state — poke it directly for movement tests (headless Chromium rAF ~40% wall-clock so give 1.5-3s per action); (b) puzzle pickups run an async kneel-and-interact ceremony (interactables.busy stays true for a few seconds) — poll gameState.seeds for 3-5s after pressing E, or watch the seeds-hud DOM; (c) window.__wnl.interactables.items (not .list) is the correct API for enumerating pickups; (d) window.__wnl.cinematic.stop() reliably skips the opening cinematic."
+}

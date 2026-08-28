@@ -4,6 +4,7 @@ import { resetMapCache } from '../../game/Map.js';
 import {
   MainMenu, PauseMenu, SettingsScreen, ControlsScreen, CreditsScreen,
   MapScreen, ConfirmOverwrite, AutosaveTick, DegradeNotice, MiniMap, TutorialHint,
+  DemoHUD, ExitDemoConfirm,
 } from './Menus.jsx';
 
 // ---------- HUD icons ----------
@@ -98,16 +99,25 @@ export default function GameApp() {
   const [tutorialText, setTutorialText] = useState(null);
   const [minimapPulse, setMinimapPulse] = useState(0);   // increments to retrigger the CSS animation
 
+  // Demo mode (hidden 2-minute showcase). Never touches player's real save.
+  const [demoState, setDemoState] = useState({ active: false, beatIdx: -1, beatCount: 7, label: null, fadeAlpha: 0 });
+  const [demoExitConfirm, setDemoExitConfirm] = useState(false);
+  // Ref pointer to startDemoFlow so the keydown effect can call it without
+  // participating in the TDZ (the callback is defined further down the file).
+  const startDemoFlowRef = useRef(null);
+
   // Refs to expose current state to callbacks that only see closure of first mount.
   const screenRef = useRef('loading');
   const pauseMenuRef = useRef(false);
   const overlayRef = useRef(null);
   const choiceOpenRef = useRef(false);
   const endingRef = useRef(null);
+  const demoActiveRef = useRef(false);
   useEffect(() => { screenRef.current = screen; }, [screen]);
   useEffect(() => { pauseMenuRef.current = pauseMenu; }, [pauseMenu]);
   useEffect(() => { overlayRef.current = overlay; }, [overlay]);
   useEffect(() => { choiceOpenRef.current = choiceOpen; }, [choiceOpen]);
+  useEffect(() => { demoActiveRef.current = !!demoState.active; }, [demoState.active]);
   useEffect(() => { endingRef.current = ending; }, [ending]);
 
   // Settings values snapshot for the UI
@@ -142,6 +152,8 @@ export default function GameApp() {
         if (overlayRef.current) return;
         if (choiceOpenRef.current) return;
         if (endingRef.current) return;
+        // Demo mode owns Esc → exit-demo confirm. Never auto-pause here.
+        if (demoActiveRef.current) return;
         if (gameRef.current) gameRef.current.pause();
         setPauseMenu(true);
       },
@@ -189,6 +201,7 @@ export default function GameApp() {
       onSilenceMood: (on) => { if (!cancelled) setSilenceMood(!!on); },
       onTutorialHint: ({ text }) => { if (!cancelled) setTutorialText(text || null); },
       onMinimapPulse: () => { if (!cancelled) setMinimapPulse((k) => k + 1); },
+      onDemoState: (payload) => { if (!cancelled) setDemoState(payload); },
       onAutosave: () => {
         if (cancelled) return;
         setAutosaveOn(true);
@@ -232,6 +245,42 @@ export default function GameApp() {
   useEffect(() => {
     const onKey = (e) => {
       if (e.code === 'F3') { e.preventDefault(); setDebugOn((v) => !v); return; }
+
+      // F9 on the main menu quietly starts the hidden demo mode. Never
+      // consumed anywhere else (never visible to normal players).
+      if (e.code === 'F9') {
+        if (screen === 'menu' && !overlay) {
+          e.preventDefault();
+          if (startDemoFlowRef.current) startDemoFlowRef.current();
+        }
+        return;
+      }
+
+      // Demo mode key handlers (only while demo is active).
+      if (demoState.active) {
+        // N — force-advance to the next beat (fade + teleport + state set).
+        if (e.code === 'KeyN') {
+          e.preventDefault();
+          const g = gameRef.current;
+          if (g && g.demo) g.demo.forceAdvance();
+          return;
+        }
+        // Esc — open exit-demo confirm (never opens pause menu in demo).
+        if (e.code === 'Escape') {
+          e.preventDefault();
+          if (demoExitConfirm) {
+            setDemoExitConfirm(false);
+          } else if (choiceOpen || ending) {
+            // During choice/ending: let the demo run its outro; ignore Esc.
+            return;
+          } else {
+            setDemoExitConfirm(true);
+            try { document.exitPointerLock(); } catch (_) {}
+          }
+          return;
+        }
+      }
+
       // Choice UI shortcuts
       if (choiceOpen) {
         let choice = null;
@@ -243,18 +292,38 @@ export default function GameApp() {
       }
       if (screen !== 'playing') return;
 
-      if (e.code === 'KeyM' && !overlay) {
+      if (e.code === 'KeyM') {
         e.preventDefault();
-        if (pauseMenu) return;
-        if (choiceOpen) return;   // do not steal the choice moment
-        if (ending) return;
-        setOverlay('map');
-        if (gameRef.current && gameRef.current.tutorial) gameRef.current.tutorial.markMapOpened();
+        // Map-toggle: allowed only from bare gameplay or when the map itself
+        // is the topmost overlay. Never intrudes on pause / choice / ending
+        // / other menu overlays.
+        if (pauseMenu || choiceOpen || ending) return;
+        if (overlay && overlay !== 'map') return;
+        if (overlay === 'map') {
+          // Close map → try to re-acquire pointer lock (M is a fresh user
+          // gesture so Chrome should honour the request).
+          setOverlay(null);
+          const g = gameRef.current;
+          if (g) { try { g.requestPointerLock(); } catch (_) {} }
+        } else {
+          // Open map: release pointer lock so the cursor is visible for the
+          // Close button; also mark the tutorial map-hint done.
+          setOverlay('map');
+          try { document.exitPointerLock(); } catch (_) {}
+          const g = gameRef.current;
+          if (g && g.tutorial) g.tutorial.markMapOpened();
+        }
         return;
       }
       if (e.code === 'Escape') {
         e.preventDefault();
-        if (overlay === 'map') { setOverlay(null); return; }
+        if (overlay === 'map') {
+          // Esc closes map. Note: Chrome enforces a ~1.25 s cool-down before
+          // pointer-lock can be re-acquired after a user-initiated Esc, so we
+          // do not try to re-lock here — the click-to-resume path handles it.
+          setOverlay(null);
+          return;
+        }
         if (overlay === 'settings' || overlay === 'controls' || overlay === 'credits' || overlay === 'confirm-new') {
           setOverlay(null); return;
         }
@@ -265,7 +334,7 @@ export default function GameApp() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, overlay, pauseMenu, choiceOpen]);
+  }, [screen, overlay, pauseMenu, choiceOpen, ending, demoState.active, demoExitConfirm]);
 
   // Apply CSS classes for text size / high contrast / silence-mood
   useEffect(() => {
@@ -306,6 +375,63 @@ export default function GameApp() {
     if (g.audio) g.audio.setMusicMode('exploration');
   }, [initAudioOnGesture]);
 
+  // ---- Demo Mode (hidden showcase) ----------------------------------------
+  const startDemoFlow = useCallback(async () => {
+    const g = gameRef.current;
+    if (!g) return;
+    initAudioOnGesture();
+    // Force quality preset to High for the recording session (safe: settings
+    // store is unchanged by this call — we only touch runtime pixel-ratio /
+    // shadows via applyQuality; the persisted setting is not overwritten).
+    try { g.applyQuality && g.applyQuality('high'); } catch (_) {}
+    g.startDemo();          // resets in-memory state, isolates persistence
+    g.exitMenuMode();
+    setScreen('playing');
+    setPauseMenu(false);
+    setOverlay(null);
+    setDemoExitConfirm(false);
+    // Play the opening cinematic — Beat 1 waits for it to end.
+    try { await g.requestPointerLock(); } catch (_) {}
+    g.playOpening();
+    if (g.audio) g.audio.setMusicMode('exploration');
+  }, [initAudioOnGesture]);
+
+  const exitDemo = useCallback(() => {
+    const g = gameRef.current;
+    if (!g) return;
+    g.stopDemo();
+    g.enterMenuMode();
+    setScreen('menu');
+    setPauseMenu(false);
+    setOverlay(null);
+    setChoiceOpen(false);
+    setEnding(null);
+    setDemoExitConfirm(false);
+    setTutorialText(null);
+    // Refresh menu save state — should be untouched from before the demo.
+    setHasSave(g.hasSave());
+    if (g.audio) g.audio.setMusicMode('exploration');
+  }, []);
+
+  // Keep the ref pointer to startDemoFlow up to date so the keydown effect
+  // (declared before startDemoFlow) can call it without a TDZ error.
+  useEffect(() => { startDemoFlowRef.current = startDemoFlow; }, [startDemoFlow]);
+
+  // Auto-start demo when the URL contains ?demo=1 and the game finishes loading.
+  const demoAutoStartedRef = useRef(false);
+  useEffect(() => {
+    if (demoAutoStartedRef.current) return;
+    if (!loaded) return;
+    if (screen !== 'menu') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('demo') === '1') {
+        demoAutoStartedRef.current = true;
+        startDemoFlow();
+      }
+    } catch (_) {}
+  }, [loaded, screen, startDemoFlow]);
+
   const onMenuContinue = useCallback(() => {
     initAudioOnGesture();
     startPlaying('continue');
@@ -326,6 +452,17 @@ export default function GameApp() {
   }, [startPlaying]);
 
   const cancelNewGame = useCallback(() => setOverlay(null), []);
+
+  // Map close via the on-screen Close button. The click is a fresh user
+  // gesture, so Chrome will honour a pointer-lock re-acquire request.
+  // (M-close and Esc-close are handled inline in the keydown effect above.)
+  const closeMapButton = useCallback(async () => {
+    setOverlay(null);
+    const g = gameRef.current;
+    if (g && screen === 'playing' && !pauseMenu) {
+      try { await g.requestPointerLock(); } catch (_) {}
+    }
+  }, [screen, pauseMenu]);
 
   const goSettings = useCallback(() => {
     initAudioOnGesture();
@@ -392,10 +529,14 @@ export default function GameApp() {
     // Return to main menu (no reload — smoother). Clears ending state.
     const g = gameRef.current;
     if (!g) return;
+    // Demo mode: stop the director cleanly and restore the player's REAL
+    // save-state flag (which was never touched during the demo).
+    const wasDemo = g.isDemoMode && g.isDemoMode();
+    if (wasDemo) g.stopDemo();
     setEnding(null);
     setScreen('menu');
-    setHasSave(false);
-    setEndingsSeen(g.endingsSeen());
+    setHasSave(wasDemo ? g.hasSave() : false);
+    if (!wasDemo) setEndingsSeen(g.endingsSeen());
     setLetterboxOn(false);
     setHudHidden(false);
     setSilenceMood(false);
@@ -500,6 +641,21 @@ export default function GameApp() {
         <TutorialHint text={tutorialText} />
       )}
 
+      {/* Demo Mode HUD — beat caption + 7 dots. Only when demo is active. */}
+      {demoState.active && screen === 'playing' && (
+        <DemoHUD
+          beatIdx={demoState.beatIdx}
+          beatCount={demoState.beatCount}
+          label={demoState.label}
+          fadeAlpha={demoState.fadeAlpha}
+        />
+      )}
+
+      {/* Exit-demo confirmation */}
+      {demoExitConfirm && (
+        <ExitDemoConfirm onKeep={() => setDemoExitConfirm(false)} onExit={exitDemo} />
+      )}
+
       {/* Degrade notice */}
       {degradeMsg && <DegradeNotice preset={degradeMsg} />}
 
@@ -589,7 +745,7 @@ export default function GameApp() {
       )}
       {overlay === 'controls' && <ControlsScreen onBack={backToRoot} />}
       {overlay === 'credits' && <CreditsScreen onBack={backToRoot} />}
-      {overlay === 'map' && <MapScreen game={gameRef.current} onClose={backToRoot} />}
+      {overlay === 'map' && <MapScreen game={gameRef.current} onClose={closeMapButton} />}
       {overlay === 'confirm-new' && <ConfirmOverwrite onCancel={cancelNewGame} onConfirm={confirmNewGame} />}
 
       {/* Error */}

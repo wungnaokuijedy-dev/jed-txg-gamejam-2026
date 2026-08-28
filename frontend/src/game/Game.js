@@ -21,6 +21,7 @@ import { save as saveGame, load as loadGame, apply as applySave, clearSave, hasS
 import { AudioEngine } from './AudioEngine.js';
 import { SettingsStore } from './Settings.js';
 import { Tutorial } from './Tutorial.js';
+import { DemoDirector } from './DemoDirector.js';
 
 export class Game {
   constructor(container, callbacks = {}) {
@@ -185,6 +186,11 @@ export class Game {
     this.tutorial = new Tutorial(this);
     this._mapOpenedSinceTutorial = false;
 
+    // Demo mode (hidden showcase for the 2-min video). Additive: never
+    // touches the player's real save, endings-seen record, or settings.
+    this._demoMode = false;
+    this.demo = new DemoDirector(this);
+
     this.puzzles = new Puzzles(this);
     this.puzzles.setup(this._standingStones);
 
@@ -267,6 +273,9 @@ export class Game {
       });
       this.gameState.on('minimap_pulse', () => {
         if (this.callbacks.onMinimapPulse) this.callbacks.onMinimapPulse();
+      });
+      this.gameState.on('demo_state', (payload) => {
+        if (this.callbacks.onDemoState) this.callbacks.onDemoState(payload);
       });
       // Autosave on major story beats
       this.gameState.on('flag', () => this.saveNow());
@@ -421,6 +430,69 @@ export class Game {
   }
   isPaused() { return this._paused; }
 
+  // ============================================================
+  // Demo Mode (hidden, additive, isolated)
+  // ============================================================
+  // Enter demo mode. Isolates all persistence: no autosave, no clearSave on
+  // newGame(), no recordEndingSeen() at ending. Resets in-memory GameState so
+  // the demo run starts clean regardless of what the player has done.
+  startDemo() {
+    this._demoMode = true;
+    // In-memory reset — never touches localStorage. Mirrors the fields set
+    // by GameState's constructor so any leftover state from menu-mode or a
+    // prior partial run doesn't leak into the demo.
+    const gs = this.gameState;
+    if (gs) {
+      gs.health = 50;
+      gs.seeds = 0;
+      gs.puzzleFlags = {
+        grow_done: false,
+        restore_done: false,
+        bird_freed: false,
+        stones_awoken: false,
+        heart_reached: false,
+      };
+      if (gs.doneInteractions && gs.doneInteractions.clear) gs.doneInteractions.clear();
+      if (gs.visitedAreas && gs.visitedAreas.clear) gs.visitedAreas.clear();
+      gs.objective = 'The forest is waiting…';
+      gs.choiceMade = null;
+      gs.endingKind = null;
+      gs.endingResolved = false;
+      gs.hudHidden = false;
+      // Broadcast so HUD reflects the reset immediately.
+      gs.emit('objective', { text: gs.objective });
+      gs.emit('health', { health: gs.health, delta: 0 });
+      gs.emit('seeds', { seeds: gs.seeds });
+    }
+    // Reset puzzle visuals to their un-solved state.
+    if (this.puzzles && typeof this.puzzles.applySavedState === 'function') {
+      this.puzzles.applySavedState();
+    }
+    // Ensure tutorial hasn't been marked done by a prior session in memory.
+    if (this.tutorial) {
+      this.tutorial._done = false;
+      this.tutorial.active = false;
+    }
+    // Weather baseline.
+    if (this.weather) this.weather.setStage('clear');
+    // Kick off — GameApp is responsible for playing the opening cinematic;
+    // the director's first beat waits for the cinematic to end.
+    this.demo.start();
+  }
+
+  // Exit demo mode. Called from Esc → "Exit Demo".
+  stopDemo() {
+    if (this.demo) this.demo.stop();
+    this._demoMode = false;
+    // Force-end any active cinematic / restore weather baseline so the menu
+    // background reads normally.
+    if (this.cinematic && this.cinematic.isActive()) this.cinematic.stop();
+    if (this.weather) this.weather.setStage('clear');
+    if (this.gameState) this.gameState.hudHidden = false;
+  }
+
+  isDemoMode() { return !!this._demoMode; }
+
   // Respawn player at Area 1 spawn keeping state intact.
   restartArea() {
     if (!this.character) return;
@@ -520,13 +592,20 @@ export class Game {
     return ok;
   }
 
-  // Wipe any existing save. Called on New Game.
+  // Wipe any existing save. Called on New Game — but NOT in demo mode
+  // (demo runs on isolated in-memory state and must never touch the
+  // player's real save).
   newGame() {
+    if (this._demoMode) {
+      this._hasSaveOnBoot = false;
+      return;
+    }
     clearSave();
     this._hasSaveOnBoot = false;
   }
 
   _doAutosave() {
+    if (this._demoMode) return;             // demo never writes to disk
     if (!this.gameState || !this.character) return;
     try {
       const ok = saveGame(this.gameState, this.character, this.weather ? this.weather.getStage() : 'clear');
@@ -539,6 +618,7 @@ export class Game {
 
   // Force an immediate save at a story beat (called from event listeners).
   saveNow() {
+    if (this._demoMode) return;             // demo never writes to disk
     const cineActive = !!(this.cinematic && this.cinematic.isActive());
     if (cineActive) return;
     if (this.gameState && this.gameState.endingResolved) return;
@@ -603,10 +683,13 @@ export class Game {
     cfg.onEnd = () => {
       const message = this.endings ? this.endings.endingMessage(kind) : '';
       this.gameState.emit('ending', { kind, message, choice });
-      // Persist ending record + clear save so a fresh New Game starts clean
-      try { recordEndingSeen(kind); } catch (_) {}
-      try { clearSave(); } catch (_) {}
-      this._hasSaveOnBoot = false;
+      // Persist ending record + clear save so a fresh New Game starts clean —
+      // but NEVER in demo mode (isolated from the player's real record).
+      if (!this._demoMode) {
+        try { recordEndingSeen(kind); } catch (_) {}
+        try { clearSave(); } catch (_) {}
+        this._hasSaveOnBoot = false;
+      }
     };
     this.cinematic.play(cfg);
   }
@@ -714,6 +797,7 @@ export class Game {
     if (this.wildlife) this.wildlife.update(dt, this.character.root.position, this.character.velocity);
     if (this.puzzles) this.puzzles.update(dt, now);
     if (this.tutorial) this.tutorial.update(dt);
+    if (this.demo && this.demo.active) this.demo.update(dt);
 
     // Area change → visit + ambience crossfade
     if (!this._menuMode && this.character) {

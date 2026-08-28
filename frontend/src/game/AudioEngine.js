@@ -482,13 +482,30 @@ export class AudioEngine {
   // ============================================================
   // Footsteps  (driven by character stride phase)
   // ============================================================
+  // Gate: only trigger foot-plants while the character is genuinely moving on
+  // the ground. Prior version gated on `moveBlend` alone — which is a damped
+  // low-pass of speed with lambda=8 (~0.13 s time constant) — so after the
+  // player released movement keys, moveBlend + phase kept advancing for the
+  // ~0.2 s velocity-decay window and produced 1-2 trailing footsteps.
+  // Now: gate on the ACTUAL horizontal speed (ground truth from physics),
+  // AND immediately clear _lastFootIndex when the gate closes so a subsequent
+  // phase-index carry-over cannot fire a spurious step on re-enter.
   updateFootsteps(character, sprinting, grounded, dt) {
     if (!this.initialized) return;
-    if (!character || !grounded) return;
-    const phase = character.phase || 0;
-    const speedN = character.moveBlend || 0;
-    if (speedN < 0.08) { this._lastFootIndex = -1; return; }
+    if (!character || !grounded) { this._lastFootIndex = -1; return; }
+    const vx = character.velocity ? character.velocity.x : 0;
+    const vz = character.velocity ? character.velocity.z : 0;
+    const horizSpeed = Math.sqrt(vx * vx + vz * vz);
+    const moveBlend = character.moveBlend || 0;
+    // Below 0.4 m/s the gait animation is effectively a shuffle-to-stop —
+    // audible footsteps would ring falsely. moveBlend > 0.15 additionally
+    // rejects the first ~1 frame of any re-acquisition.
+    if (horizSpeed < 0.4 || moveBlend < 0.15) {
+      this._lastFootIndex = -1;
+      return;
+    }
     // Foot triggers at cos-phase zero crossings (heel strikes) → 2 per stride
+    const phase = character.phase || 0;
     const idx = Math.floor(phase / Math.PI);
     if (idx !== this._lastFootIndex) {
       this._lastFootIndex = idx;

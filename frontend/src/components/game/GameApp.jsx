@@ -4,7 +4,7 @@ import { resetMapCache } from '../../game/Map.js';
 import {
   MainMenu, PauseMenu, SettingsScreen, ControlsScreen, CreditsScreen,
   MapScreen, ConfirmOverwrite, AutosaveTick, DegradeNotice, MiniMap, TutorialHint,
-  DemoHUD, ExitDemoConfirm,
+  DemoHUD, ExitDemoConfirm, DemoTagCard,
 } from './Menus.jsx';
 
 // ---------- HUD icons ----------
@@ -102,6 +102,7 @@ export default function GameApp() {
   // Demo mode (hidden 2-minute showcase). Never touches player's real save.
   const [demoState, setDemoState] = useState({ active: false, beatIdx: -1, beatCount: 7, label: null, fadeAlpha: 0 });
   const [demoExitConfirm, setDemoExitConfirm] = useState(false);
+  const [demoTagCard, setDemoTagCard] = useState(false);   // demo-only closing card
   // Ref pointer to startDemoFlow so the keydown effect can call it without
   // participating in the TDZ (the callback is defined further down the file).
   const startDemoFlowRef = useRef(null);
@@ -407,6 +408,7 @@ export default function GameApp() {
     setChoiceOpen(false);
     setEnding(null);
     setDemoExitConfirm(false);
+    setDemoTagCard(false);
     setTutorialText(null);
     // Refresh menu save state — should be untouched from before the demo.
     setHasSave(g.hasSave());
@@ -431,6 +433,16 @@ export default function GameApp() {
       }
     } catch (_) {}
   }, [loaded, screen, startDemoFlow]);
+
+  // Demo-only closing card: 3 s after the ending resolves, cross-fade to the
+  // "Made for TXG Nagaland Game Jam 2026" tag card so the recording has a
+  // clean, jam-branded closing frame. Never fires in normal mode.
+  useEffect(() => {
+    if (!ending) { setDemoTagCard(false); return; }
+    if (!demoState.active) return;
+    const id = window.setTimeout(() => setDemoTagCard(true), 3000);
+    return () => window.clearTimeout(id);
+  }, [ending, demoState.active]);
 
   const onMenuContinue = useCallback(() => {
     initAudioOnGesture();
@@ -540,6 +552,7 @@ export default function GameApp() {
     setLetterboxOn(false);
     setHudHidden(false);
     setSilenceMood(false);
+    setDemoTagCard(false);      // reset closing tag on return
     resetMapCache();
     g.enterMenuMode();
     if (g.audio) g.audio.setMusicMode('exploration');
@@ -693,6 +706,12 @@ export default function GameApp() {
             Return to the Woods
           </button>
         </div>
+      )}
+
+      {/* Demo-only closing tag card — appears 3 s after the ending card, as
+          the recording's final frame. Never rendered in normal mode. */}
+      {ending && demoState.active && demoTagCard && (
+        <DemoTagCard onReturn={handleReturnToWoods} />
       )}
 
       {/* Loading screen */}

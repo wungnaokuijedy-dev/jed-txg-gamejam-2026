@@ -527,3 +527,32 @@ export function ExitDemoConfirm({ onKeep, onExit }) {
     </div>
   );
 }
+
+
+// -------------------------------------------------------
+// Demo Tag Card — the video's closing frame. Rendered 3 s
+// after the ending card, ONLY while demo mode is active.
+// Matches ending-card typography (Cormorant italic, wide
+// letter-spacing) with a small title glyph above.
+// -------------------------------------------------------
+export function DemoTagCard({ onReturn }) {
+  return (
+    <div className="wnl-demo-tag-card" data-testid="demo-tag-card">
+      <div className="wnl-demo-tag-title" data-testid="demo-tag-title">
+        Where Nature Leads
+      </div>
+      <div className="wnl-demo-tag-rule" aria-hidden="true" />
+      <div className="wnl-demo-tag-line" data-testid="demo-tag-line">
+        Made for TXG Nagaland Game Jam 2026
+      </div>
+      <button
+        className="wnl-demo-tag-return"
+        onClick={onReturn}
+        data-testid="demo-tag-return-btn"
+        aria-label="Return to menu"
+      >
+        Return
+      </button>
+    </div>
+  );
+}
